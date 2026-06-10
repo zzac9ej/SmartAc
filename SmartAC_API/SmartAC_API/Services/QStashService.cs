@@ -21,11 +21,15 @@ public class QStashService : IQStashService
     {
         var qstashToken = _config["QStash:Token"];
         var callbackUrl = _config["QStash:CallbackUrl"];
+        var qstashBaseUrl = _config["QStash:BaseUrl"] ?? "https://qstash.upstash.io";
+        
+        // 確保網址結尾沒有斜線，方便拼接
+        qstashBaseUrl = qstashBaseUrl.TrimEnd('/');
 
         var client = _httpClientFactory.CreateClient();
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {qstashToken}");
         
-        var qstashUrl = $"https://qstash.upstash.io/v2/publish/{callbackUrl}";
+        var qstashUrl = $"{qstashBaseUrl}/v2/publish/{callbackUrl}";
         
         var payload = JsonSerializer.Serialize(new { Action = action });
         var content = new StringContent(payload);
@@ -47,7 +51,7 @@ public class QStashService : IQStashService
         {
             var error = await response.Content.ReadAsStringAsync();
             _logger.LogError("QStash API Error: {Error}", error);
-            return false;
+            throw new Exception($"QStash API 回傳錯誤: {response.StatusCode} - {error}");
         }
 
         return true;
