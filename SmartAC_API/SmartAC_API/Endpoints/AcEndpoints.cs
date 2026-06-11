@@ -23,7 +23,7 @@ public static class AcEndpoints
         // 1. iPhone 捷徑呼叫這個端點 (User Input)
         app.MapPost("/api/schedule", async ([FromBody] ScheduleRequestDto request, IQStashService qstashService) =>
         {
-            int finalDelayMinutes = 0;
+            DateTime? targetTimeUtc = null;
 
             if (!string.IsNullOrEmpty(request.TargetTime))
             {
@@ -31,13 +31,13 @@ public static class AcEndpoints
                 {
                     // 永遠以台灣時間 (UTC+8) 作為基準，避免不同雲端平台的時區問題
                     var nowTw = DateTime.UtcNow.AddHours(8);
-                    var targetDateTime = nowTw.Date.Add(time);
+                    var targetDateTimeTw = nowTw.Date.Add(time);
                     
-                    if (targetDateTime <= nowTw)
+                    if (targetDateTimeTw <= nowTw)
                     {
-                        targetDateTime = targetDateTime.AddDays(1); // 明天的這個時間
+                        targetDateTimeTw = targetDateTimeTw.AddDays(1); // 明天的這個時間
                     }
-                    finalDelayMinutes = (int)Math.Ceiling((targetDateTime - nowTw).TotalMinutes);
+                    targetTimeUtc = targetDateTimeTw.AddHours(-8);
                 }
                 else
                 {
@@ -46,31 +46,38 @@ public static class AcEndpoints
             }
             else if (request.DelayHours.HasValue)
             {
-                finalDelayMinutes = (int)(request.DelayHours.Value * 60);
+                targetTimeUtc = DateTime.UtcNow.AddHours(request.DelayHours.Value);
             }
-            else if (request.DelayMinutes.HasValue)
+            else if (request.DelayMinutes.HasValue && request.DelayMinutes.Value > 0)
             {
-                finalDelayMinutes = request.DelayMinutes.Value;
+                targetTimeUtc = DateTime.UtcNow.AddMinutes(request.DelayMinutes.Value);
             }
             else
             {
-                return Results.BadRequest(new { Message = "必須提供 DelayMinutes, DelayHours 或 TargetTime 其中之一" });
+                // 如果是 DelayMinutes = 0 (馬上開)，targetTimeUtc 留空，代表不需延遲
+                targetTimeUtc = null;
             }
 
-            var messageId = await qstashService.ScheduleActionAsync(request.Action, finalDelayMinutes);
+            var messageId = await qstashService.ScheduleActionAsync(request.Action, targetTimeUtc);
 
             if (!string.IsNullOrEmpty(messageId))
             {
+                var executeTimeTw = targetTimeUtc.HasValue ? targetTimeUtc.Value.AddHours(8) : DateTime.UtcNow.AddHours(8);
+
                 var record = new ScheduledRecord
                 {
                     MessageId = messageId,
                     Action = request.Action,
                     CreatedAt = DateTime.UtcNow.AddHours(8),
-                    ExecuteAt = DateTime.UtcNow.AddHours(8).AddMinutes(finalDelayMinutes)
+                    ExecuteAt = executeTimeTw
                 };
                 _schedules.TryAdd(messageId, record);
 
-                return Results.Ok(new { Message = $"冷氣排程已設定！將在 {finalDelayMinutes} 分鐘後執行 {request.Action}。" });
+                var msg = targetTimeUtc.HasValue 
+                    ? $"冷氣排程已設定！將在 {executeTimeTw:MM/dd HH:mm} 執行 {request.Action}。"
+                    : $"指令已成功發送！({request.Action})";
+
+                return Results.Ok(new { Message = msg });
             }
             
             return Results.Problem("QStash API 排程失敗，請查看伺服器 Log。");

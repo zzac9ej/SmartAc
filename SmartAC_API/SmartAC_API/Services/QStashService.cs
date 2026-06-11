@@ -17,7 +17,7 @@ public class QStashService : IQStashService
         _logger = logger;
     }
 
-    public async Task<string?> ScheduleActionAsync(string action, int delayMinutes)
+    public async Task<string?> ScheduleActionAsync(string action, DateTime? targetTimeUtc)
     {
         var qstashToken = _config["QStash:Token"];
         var callbackUrl = _config["QStash:CallbackUrl"];
@@ -40,9 +40,10 @@ public class QStashService : IQStashService
             Content = content
         };
 
-        if (delayMinutes > 0)
+        if (targetTimeUtc.HasValue)
         {
-            qstashRequest.Headers.Add("Upstash-Delay", $"{delayMinutes}m");
+            var unixTimestamp = new DateTimeOffset(targetTimeUtc.Value).ToUnixTimeSeconds();
+            qstashRequest.Headers.Add("Upstash-Not-Before", unixTimestamp.ToString());
         }
 
         var response = await client.SendAsync(qstashRequest);
