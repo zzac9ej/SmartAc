@@ -22,7 +22,4 @@ app.UseStaticFiles();
 // 註冊所有的 API Endpoints
 app.MapAcEndpoints();
 
-// 加上一個簡單的 GET 根目錄，這樣打開瀏覽器就不會顯示 404 了
-app.MapGet("/", () => "SmartAC API 正在執行中！請對 /api/schedule 發送 POST 請求來排程。");
-
 app.Run();
