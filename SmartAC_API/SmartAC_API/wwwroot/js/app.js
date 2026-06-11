@@ -1,102 +1,66 @@
 document.addEventListener('DOMContentLoaded', () => {
     // DOM Elements
-    const scheduleForm = document.getElementById('schedule-form');
-    const actionBtns = document.querySelectorAll('.action-btn');
-    const actionInput = document.getElementById('action-input');
-    const timeTypeSelect = document.getElementById('time-type');
-    const minutesGroup = document.getElementById('minutes-group');
-    const targetGroup = document.getElementById('target-group');
-    const formMessage = document.getElementById('form-message');
-    const submitBtn = document.querySelector('.submit-btn');
-    const btnText = document.querySelector('.btn-text');
-    const loader = document.querySelector('.loader');
+    const megaBtns = document.querySelectorAll('.mega-btn');
+    const customTimeInput = document.getElementById('custom-time');
+    const btnCustomOn = document.getElementById('btn-custom-on');
+    const btnCustomOff = document.getElementById('btn-custom-off');
+    
     const scheduleList = document.getElementById('schedule-list');
     const refreshBtn = document.getElementById('refresh-btn');
+    const loader = document.getElementById('fullscreen-loader');
+    const toast = document.getElementById('toast');
 
-    // UI Logic: Toggle Action Buttons
-    actionBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            actionBtns.forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            actionInput.value = btn.dataset.action;
+    // 1. 綁定大按鈕點擊事件 (延遲開/關)
+    megaBtns.forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.action;
+            const delayMinutes = parseInt(btn.dataset.delay);
+            
+            await sendScheduleRequest({ Action: action, DelayMinutes: delayMinutes });
         });
     });
 
-    // UI Logic: Toggle Time Input Type
-    timeTypeSelect.addEventListener('change', (e) => {
-        if (e.target.value === 'minutes') {
-            minutesGroup.classList.remove('hidden');
-            targetGroup.classList.add('hidden');
-        } else {
-            minutesGroup.classList.add('hidden');
-            targetGroup.classList.remove('hidden');
+    // 2. 綁定指定時間按鈕事件
+    const handleCustomTime = async (action) => {
+        const time = customTimeInput.value;
+        if (!time) {
+            showToast('請先選擇時間喔！', true);
+            return;
         }
-    });
+        await sendScheduleRequest({ Action: action, TargetTime: time });
+        customTimeInput.value = ''; // 清空輸入
+    };
 
-    // Handle Form Submit
-    scheduleForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        // Form state loading
-        setLoading(true);
-        showMessage('', '');
+    btnCustomOn.addEventListener('click', () => handleCustomTime('turn_on'));
+    btnCustomOff.addEventListener('click', () => handleCustomTime('turn_off'));
 
-        const action = actionInput.value;
-        const timeType = timeTypeSelect.value;
-        
-        const payload = { Action: action };
-
-        if (timeType === 'minutes') {
-            const mins = document.getElementById('delay-minutes').value;
-            if (!mins) {
-                showMessage('請輸入延遲分鐘數', 'error');
-                setLoading(false);
-                return;
-            }
-            payload.DelayMinutes = parseInt(mins);
-        } else {
-            const time = document.getElementById('target-time').value;
-            if (!time) {
-                showMessage('請選擇目標時間', 'error');
-                setLoading(false);
-                return;
-            }
-            payload.TargetTime = time;
-        }
-
+    // 發送排程請求到 API
+    async function sendScheduleRequest(payload) {
+        showLoader(true);
         try {
             const response = await fetch('/api/schedule', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
 
             const result = await response.json();
 
             if (response.ok) {
-                showMessage(result.message || '排程設定成功！', 'success');
-                // Reset inputs
-                document.getElementById('delay-minutes').value = '';
-                document.getElementById('target-time').value = '';
-                // Reload list
-                loadSchedules();
+                showToast('設定成功！', false);
+                await loadSchedules(); // 重新載入列表
             } else {
-                showMessage(result.message || '排程失敗，請稍後再試', 'error');
+                showToast('設定失敗，請稍後再試', true);
             }
         } catch (error) {
-            showMessage('連線發生錯誤', 'error');
+            showToast('連線異常，請檢查網路', true);
             console.error(error);
         } finally {
-            setLoading(false);
+            showLoader(false);
         }
-    });
+    }
 
-    // Refresh list manually
-    refreshBtn.addEventListener('click', loadSchedules);
-
-    // Load Schedules from API
+    // 載入與繪製排程清單
     async function loadSchedules() {
         try {
             const response = await fetch('/api/schedules');
@@ -105,15 +69,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const list = await response.json();
             renderSchedules(list);
         } catch (error) {
-            console.error('Error loading schedules:', error);
-            scheduleList.innerHTML = '<div class="empty-state" style="color:var(--danger-color)">無法載入排程</div>';
+            console.error('Error:', error);
+            scheduleList.innerHTML = '<div class="empty-state" style="color:var(--color-off)">無法讀取資料</div>';
         }
     }
 
-    // Render Schedules to DOM
     function renderSchedules(list) {
         if (!list || list.length === 0) {
-            scheduleList.innerHTML = '<div class="empty-state">目前沒有排程</div>';
+            scheduleList.innerHTML = '<div class="empty-state">目前沒有任何排程</div>';
             return;
         }
 
@@ -127,74 +90,81 @@ document.addEventListener('DOMContentLoaded', () => {
             card.className = 'schedule-card';
             card.innerHTML = `
                 <div class="schedule-info">
-                    <div class="schedule-action">
-                        <span class="badge ${isTurnOn ? 'badge-on' : 'badge-off'}">${isTurnOn ? '開冷氣' : '關冷氣'}</span>
+                    <div class="badge ${isTurnOn ? 'badge-on' : 'badge-off'}">
+                        ${isTurnOn ? '開冷氣' : '關冷氣'}
                     </div>
                     <div class="schedule-time">
-                        預計執行: ${formatDate(executeTime)}
+                        執行時間：${formatDate(executeTime)}
                     </div>
                 </div>
-                <button class="btn btn-danger delete-btn" data-id="${item.messageId}">取消</button>
+                <button class="delete-btn" data-id="${item.messageId}">取消</button>
             `;
             
             scheduleList.appendChild(card);
         });
 
-        // Add delete event listeners
+        // 綁定取消按鈕事件
         document.querySelectorAll('.delete-btn').forEach(btn => {
             btn.addEventListener('click', async (e) => {
                 const id = e.target.dataset.id;
-                const originalText = e.target.innerText;
                 e.target.innerText = '取消中...';
                 e.target.disabled = true;
                 
                 try {
                     const res = await fetch(`/api/schedule/${id}`, { method: 'DELETE' });
                     if (res.ok) {
-                        loadSchedules(); // Reload on success
+                        showToast('已取消！', false);
+                        await loadSchedules();
                     } else {
                         throw new Error('Delete failed');
                     }
                 } catch (error) {
-                    alert('取消失敗，請稍後再試');
-                    e.target.innerText = originalText;
+                    showToast('取消失敗', true);
+                    e.target.innerText = '取消';
                     e.target.disabled = false;
                 }
             });
         });
     }
 
-    // Helpers
-    function setLoading(isLoading) {
-        submitBtn.disabled = isLoading;
-        if (isLoading) {
-            btnText.classList.add('hidden');
+    // 輔助函式：顯示/隱藏全螢幕 Loader
+    function showLoader(show) {
+        if (show) {
             loader.classList.remove('hidden');
         } else {
-            btnText.classList.remove('hidden');
             loader.classList.add('hidden');
         }
     }
 
-    function showMessage(msg, type) {
-        if (!msg) {
-            formMessage.className = 'message hidden';
-            formMessage.innerText = '';
-            return;
+    // 輔助函式：顯示 Toast 訊息
+    let toastTimeout;
+    function showToast(msg, isError) {
+        toast.innerText = msg;
+        if (isError) {
+            toast.classList.add('error');
+        } else {
+            toast.classList.remove('error');
         }
-        formMessage.className = `message ${type}`;
-        formMessage.innerText = msg;
+        
+        toast.classList.remove('hidden');
+        
+        clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => {
+            toast.classList.add('hidden');
+        }, 3000);
     }
 
     function formatDate(date) {
-        const d = new Date(date);
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        const HH = String(d.getHours()).padStart(2, '0');
-        const min = String(d.getMinutes()).padStart(2, '0');
-        return `${mm}/${dd} ${HH}:${min}`;
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        const HH = String(date.getHours()).padStart(2, '0');
+        const min = String(date.getMinutes()).padStart(2, '0');
+        return `${mm}月${dd}日 ${HH}:${min}`;
     }
 
-    // Initial load
+    // 綁定重新整理按鈕
+    refreshBtn.addEventListener('click', loadSchedules);
+
+    // 初始載入
     loadSchedules();
 });
