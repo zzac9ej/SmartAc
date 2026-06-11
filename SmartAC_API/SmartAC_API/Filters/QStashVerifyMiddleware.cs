@@ -49,29 +49,37 @@ public class QStashVerifyMiddleware
 
         try
         {
-            if (!VerifySignature(token, bodyString, _currentSigningKey) &&
-                !VerifySignature(token, bodyString, _nextSigningKey))
+            var (isValid, errorDetail) = VerifySignatureWithDetail(token, bodyString, _currentSigningKey);
+            if (isValid)
             {
-                _logger.LogWarning("Invalid Upstash signature.");
-                context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Invalid signature.");
+                await _next(context);
                 return;
             }
+
+            var (isValidNext, errorDetailNext) = VerifySignatureWithDetail(token, bodyString, _nextSigningKey);
+            if (isValidNext)
+            {
+                await _next(context);
+                return;
+            }
+
+            _logger.LogWarning("Invalid Upstash signature. CurrentKeyError: {E1}, NextKeyError: {E2}", errorDetail, errorDetailNext);
+            context.Response.StatusCode = 401;
+            await context.Response.WriteAsync($"Invalid signature. Error: {errorDetail}");
+            return;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error verifying Upstash signature.");
             context.Response.StatusCode = 401;
-            await context.Response.WriteAsync("Signature verification failed.");
+            await context.Response.WriteAsync($"Signature verification failed. Exception: {ex.Message}");
             return;
         }
-
-        await _next(context);
     }
 
-    private bool VerifySignature(string token, string body, string signingKey)
+    private (bool isValid, string error) VerifySignatureWithDetail(string token, string body, string signingKey)
     {
-        if (string.IsNullOrEmpty(signingKey)) return false;
+        if (string.IsNullOrEmpty(signingKey)) return (false, "Signing key is empty.");
 
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(signingKey);
@@ -98,22 +106,21 @@ public class QStashVerifyMiddleware
             var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(body));
             var expectedHash = Base64UrlEncoder.Encode(hashBytes);
 
-            // 如果 body 是空的，QStash 可能不會附帶 body claim，這邊需要防呆
             if (string.IsNullOrEmpty(body) && string.IsNullOrEmpty(bodyClaim))
             {
-                return true;
+                return (true, "");
             }
 
             if (bodyClaim != expectedHash)
             {
-                return false;
+                return (false, $"Body hash mismatch. Expected: {expectedHash}, Got: {bodyClaim}");
             }
 
-            return true;
+            return (true, "");
         }
-        catch
+        catch (Exception ex)
         {
-            return false;
+            return (false, $"Token validation exception: {ex.Message}");
         }
     }
 }
