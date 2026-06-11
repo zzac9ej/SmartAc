@@ -111,7 +111,10 @@ public class QStashVerifyMiddleware
                 return (true, "");
             }
 
-            if (bodyClaim != expectedHash)
+            // Upstash 的 body claim 可能會帶有 '=' 結尾 (Padding)，但 .NET 的 Base64UrlEncoder 預設會去掉
+            var normalizedBodyClaim = bodyClaim?.TrimEnd('=');
+
+            if (normalizedBodyClaim != expectedHash)
             {
                 return (false, $"Body hash mismatch. Expected: {expectedHash}, Got: {bodyClaim}");
             }
