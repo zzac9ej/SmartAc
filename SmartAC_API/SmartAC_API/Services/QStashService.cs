@@ -17,7 +17,7 @@ public class QStashService : IQStashService
         _logger = logger;
     }
 
-    public async Task<bool> ScheduleActionAsync(string action, int delayMinutes)
+    public async Task<string?> ScheduleActionAsync(string action, int delayMinutes)
     {
         var qstashToken = _config["QStash:Token"];
         var callbackUrl = _config["QStash:CallbackUrl"];
@@ -52,6 +52,42 @@ public class QStashService : IQStashService
             var error = await response.Content.ReadAsStringAsync();
             _logger.LogError("QStash API Error: {Error}", error);
             throw new Exception($"QStash API 回傳錯誤: {response.StatusCode} - {error}");
+        }
+
+        var responseBody = await response.Content.ReadAsStringAsync();
+        try
+        {
+            var json = JsonDocument.Parse(responseBody);
+            if (json.RootElement.TryGetProperty("messageId", out var messageIdProp))
+            {
+                return messageIdProp.GetString();
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogError(ex, "Failed to parse QStash response: {ResponseBody}", responseBody);
+        }
+
+        return null;
+    }
+
+    public async Task<bool> CancelMessageAsync(string messageId)
+    {
+        var qstashToken = _config["QStash:Token"];
+        var qstashBaseUrl = _config["QStash:BaseUrl"] ?? "https://qstash.upstash.io";
+        qstashBaseUrl = qstashBaseUrl.TrimEnd('/');
+
+        var client = _httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {qstashToken}");
+
+        var url = $"{qstashBaseUrl}/v2/messages/{messageId}";
+        var response = await client.DeleteAsync(url);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = await response.Content.ReadAsStringAsync();
+            _logger.LogError("QStash Delete API Error: {Error}", error);
+            return false;
         }
 
         return true;

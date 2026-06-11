@@ -16,6 +16,9 @@ var app = builder.Build();
 
 app.UseMiddleware<SmartAC_API.Filters.QStashVerifyMiddleware>();
 
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
 // 註冊所有的 API Endpoints
 app.MapAcEndpoints();
 
