@@ -62,17 +62,19 @@ public static class AcEndpoints
 
             if (!string.IsNullOrEmpty(messageId))
             {
-                var executeTimeTw = targetTimeUtc.HasValue ? targetTimeUtc.Value.AddHours(8) : DateTime.UtcNow.AddHours(8);
+                var executeTimeUtc = targetTimeUtc ?? DateTime.UtcNow;
 
                 var record = new ScheduledRecord
                 {
                     MessageId = messageId,
                     Action = request.Action,
-                    CreatedAt = DateTime.UtcNow.AddHours(8),
-                    ExecuteAt = executeTimeTw
+                    CreatedAt = DateTime.UtcNow,
+                    ExecuteAt = executeTimeUtc
                 };
                 _schedules.TryAdd(messageId, record);
 
+                // 為了給使用者的回傳訊息，還是算一下台灣時間
+                var executeTimeTw = targetTimeUtc.HasValue ? targetTimeUtc.Value.AddHours(8) : DateTime.UtcNow.AddHours(8);
                 var msg = targetTimeUtc.HasValue 
                     ? $"冷氣排程已設定！將在 {executeTimeTw:MM/dd HH:mm} 執行 {request.Action}。"
                     : $"指令已成功發送！({request.Action})";
@@ -100,7 +102,7 @@ public static class AcEndpoints
         app.MapGet("/api/schedules", () =>
         {
             // 自動清除已經過期的排程
-            var now = DateTime.UtcNow.AddHours(8);
+            var now = DateTime.UtcNow;
             var expiredKeys = _schedules.Where(k => k.Value.ExecuteAt < now).Select(k => k.Key).ToList();
             foreach (var key in expiredKeys)
             {
