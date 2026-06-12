@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tempValue = document.getElementById('temp-value');
     const btnTempUp = document.getElementById('btn-temp-up');
     const btnTempDown = document.getElementById('btn-temp-down');
-    let currentTemp = 26;
+    let currentTemp = 27;
 
     if (btnTempUp && btnTempDown && tempValue) {
         btnTempUp.addEventListener('click', () => {
