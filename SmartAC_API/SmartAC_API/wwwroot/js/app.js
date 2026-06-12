@@ -16,20 +16,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnTempDown = document.getElementById('btn-temp-down');
     let currentTemp = 27;
 
-    if (btnTempUp && btnTempDown && tempValue) {
+        let tempTimeout;
+        
         btnTempUp.addEventListener('click', () => {
             if (currentTemp < 30) {
                 currentTemp++;
                 tempValue.innerText = currentTemp;
+                
+                // 模擬真實遙控器：停頓 0.5 秒後自動發送訊號
+                clearTimeout(tempTimeout);
+                tempTimeout = setTimeout(() => {
+                    sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
+                }, 500);
             }
         });
+        
         btnTempDown.addEventListener('click', () => {
             if (currentTemp > 18) {
                 currentTemp--;
                 tempValue.innerText = currentTemp;
+                
+                clearTimeout(tempTimeout);
+                tempTimeout = setTimeout(() => {
+                    sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
+                }, 500);
             }
         });
-    }
 
     // 1. 綁定大按鈕點擊事件 (延遲開/關)
     megaBtns.forEach(btn => {
@@ -56,8 +68,8 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCustomOff.addEventListener('click', () => handleCustomTime('turn_off'));
 
     // 發送排程請求到 API
-    async function sendScheduleRequest(payload) {
-        showLoader(true);
+    async function sendScheduleRequest(payload, silent = false) {
+        if (!silent) showLoader(true);
         try {
             const response = await fetch('/api/schedule', {
                 method: 'POST',
@@ -77,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('連線異常，請檢查網路', true);
             console.error(error);
         } finally {
-            showLoader(false);
+            if (!silent) showLoader(false);
         }
     }
 
