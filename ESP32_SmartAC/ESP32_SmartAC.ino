@@ -116,11 +116,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       // 1. 直接用我們推算出來的終極密碼規律，算出這個溫度的專屬密碼
       uint64_t state = getAcState("turn_on", temp);
       
-      // 2. 用我們自己寫的完美節拍器發射 3 次
-      sendCustomKelon(state);
-      delay(40);
-      sendCustomKelon(state);
-      delay(40);
+      // 2. 用我們自己寫的完美節拍器發射 1 次 (避免冷氣連叫三次)
       sendCustomKelon(state);
       
       Serial.println("發射完畢！");
@@ -131,8 +127,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
       // 拿取字典裡的專屬關機密碼
       uint64_t state = getAcState("turn_off", 0);
       
-      sendCustomKelon(state);
-      delay(40);
       sendCustomKelon(state);
       
       Serial.println("發射完畢！");
