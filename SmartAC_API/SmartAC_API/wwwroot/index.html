@@ -25,6 +25,18 @@
             <h1>冷氣遙控器</h1>
         </header>
 
+        <!-- 溫度設定區 -->
+        <section class="temperature-panel glass-panel" style="text-align: center; margin-bottom: 20px;">
+            <h2 style="margin-bottom: 15px;">🌡️ 溫度設定</h2>
+            <div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
+                <button id="btn-temp-down" class="icon-btn" style="width: 60px; height: 60px; font-size: 24px;">➖</button>
+                <div style="font-size: 48px; font-weight: 900; color: var(--color-primary);">
+                    <span id="temp-value">26</span><span style="font-size: 24px; color: var(--color-text);">°C</span>
+                </div>
+                <button id="btn-temp-up" class="icon-btn" style="width: 60px; height: 60px; font-size: 24px;">➕</button>
+            </div>
+        </section>
+
         <!-- 遙控器大按鈕區 -->
         <section class="remote-grid">
             <button class="mega-btn btn-on" data-action="turn_on" data-delay="0">

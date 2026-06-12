@@ -10,13 +10,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('fullscreen-loader');
     const toast = document.getElementById('toast');
 
+    // 溫度控制邏輯
+    const tempValue = document.getElementById('temp-value');
+    const btnTempUp = document.getElementById('btn-temp-up');
+    const btnTempDown = document.getElementById('btn-temp-down');
+    let currentTemp = 26;
+
+    if (btnTempUp && btnTempDown && tempValue) {
+        btnTempUp.addEventListener('click', () => {
+            if (currentTemp < 30) {
+                currentTemp++;
+                tempValue.innerText = currentTemp;
+            }
+        });
+        btnTempDown.addEventListener('click', () => {
+            if (currentTemp > 18) {
+                currentTemp--;
+                tempValue.innerText = currentTemp;
+            }
+        });
+    }
+
     // 1. 綁定大按鈕點擊事件 (延遲開/關)
     megaBtns.forEach(btn => {
         btn.addEventListener('click', async () => {
             const action = btn.dataset.action;
             const delayMinutes = parseInt(btn.dataset.delay);
             
-            await sendScheduleRequest({ Action: action, DelayMinutes: delayMinutes });
+            await sendScheduleRequest({ Action: action, DelayMinutes: delayMinutes, Temperature: currentTemp });
         });
     });
 
@@ -27,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('請先選擇時間喔！', true);
             return;
         }
-        await sendScheduleRequest({ Action: action, TargetTime: time });
+        await sendScheduleRequest({ Action: action, TargetTime: time, Temperature: currentTemp });
         customTimeInput.value = ''; // 清空輸入
     };
 

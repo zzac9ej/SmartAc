@@ -58,7 +58,7 @@ public static class AcEndpoints
                 targetTimeUtc = null;
             }
 
-            var messageId = await qstashService.ScheduleActionAsync(request.Action, targetTimeUtc);
+            var messageId = await qstashService.ScheduleActionAsync(request.Action, targetTimeUtc, request.Temperature);
 
             if (!string.IsNullOrEmpty(messageId))
             {
@@ -86,7 +86,7 @@ public static class AcEndpoints
         // 2. QStash 倒數結束後，呼叫這個端點 (Callback & 喚醒執行)
         app.MapPost("/api/callback", async ([FromBody] ActionRequestDto request, IMqttService mqttService) =>
         {
-            var success = await mqttService.PublishCommandAsync(request.Action);
+            var success = await mqttService.PublishCommandAsync(request.Action, request.Temperature);
 
             if (success)
             {

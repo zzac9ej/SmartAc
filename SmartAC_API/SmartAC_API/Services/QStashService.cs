@@ -17,7 +17,7 @@ public class QStashService : IQStashService
         _logger = logger;
     }
 
-    public async Task<string?> ScheduleActionAsync(string action, DateTime? targetTimeUtc)
+    public async Task<string?> ScheduleActionAsync(string action, DateTime? targetTimeUtc, int? temperature = null)
     {
         var qstashToken = _config["QStash:Token"];
         var callbackUrl = _config["QStash:CallbackUrl"];
@@ -31,7 +31,11 @@ public class QStashService : IQStashService
         
         var qstashUrl = $"{qstashBaseUrl}/v2/publish/{callbackUrl}";
         
-        var payload = JsonSerializer.Serialize(new { Action = action });
+        object payloadData = temperature.HasValue 
+            ? new { Action = action, Temperature = temperature.Value }
+            : new { Action = action };
+            
+        var payload = JsonSerializer.Serialize(payloadData);
         var content = new StringContent(payload);
         content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
 

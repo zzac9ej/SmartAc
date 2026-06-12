@@ -16,7 +16,7 @@ public class MqttService : IMqttService
         _logger = logger;
     }
 
-    public async Task<bool> PublishCommandAsync(string command)
+    public async Task<bool> PublishCommandAsync(string command, int? temperature = null)
     {
         var mqttFactory = new MqttFactory();
         using var mqttClient = mqttFactory.CreateMqttClient();
@@ -34,7 +34,11 @@ public class MqttService : IMqttService
         {
             await mqttClient.ConnectAsync(mqttOptions);
             
-            var messagePayload = JsonSerializer.Serialize(new { command = command });
+            object messagePayloadObj = temperature.HasValue
+                ? new { command = command, temperature = temperature.Value }
+                : new { command = command };
+                
+            var messagePayload = JsonSerializer.Serialize(messagePayloadObj);
             var message = new MqttApplicationMessageBuilder()
                 .WithTopic(topic)
                 .WithPayload(messagePayload)
