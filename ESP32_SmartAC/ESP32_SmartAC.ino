@@ -1,6 +1,9 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include <esp_task_wdt.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // 載入紅外線控制庫
 #include <Arduino.h>
@@ -27,6 +30,36 @@ IRsend rawSender(kIrLed); // 新增一個用來發射物理波形的物件
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+
+// ==========================================
+// 系統穩定度與非阻塞連線管理設定
+// ==========================================
+#define WDT_TIMEOUT 10                        // 看門狗超時時間 (秒)
+const unsigned long REBOOT_INTERVAL_MS = 86400000; // 定期自動重啟時間 (24 小時)
+
+unsigned long setupTime = 0;
+unsigned long lastWiFiCheckTime = 0;
+unsigned long lastMqttConnectAttempt = 0;
+unsigned long lastHeapReportTime = 0;
+
+// 看門狗初始化 (相容 ESP32 Arduino Core 2.x 與 3.x)
+void initWatchdog() {
+#ifdef ESP_IDF_VERSION_VAL
+  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+    esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = WDT_TIMEOUT * 1000,
+      .idle_core_mask = 0,
+      .trigger_panic = true
+    };
+    esp_task_wdt_init(&wdt_config);
+  #else
+    esp_task_wdt_init(WDT_TIMEOUT, true);
+  #endif
+#else
+  esp_task_wdt_init(WDT_TIMEOUT, true);
+#endif
+  esp_task_wdt_add(NULL); // 監視主 loop 任務
+}
 
 // ==========================================
 // 客製化 Kelon 波形發射器
@@ -134,65 +167,117 @@ void callback(char* topic, byte* payload, unsigned int length) {
   }
 }
 
-void setup_wifi() {
-  delay(10);
+void setup_wifi_nonblocking() {
   Serial.println();
-  Serial.print("正在連線至 WiFi: ");
+  Serial.print("正在初始化 WiFi 連線至: ");
   Serial.println(ssid);
-
+  
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
+  
+  // 啟動時最多等待 5 秒 (避免完全無 WiFi 時開機卡死)
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 10) {
     delay(500);
     Serial.print(".");
+    esp_task_wdt_reset(); // 確保此期間不觸發看門狗
+    attempts++;
   }
-
-  Serial.println("");
-  Serial.println("WiFi 連線成功！");
-  Serial.print("IP 位址: ");
-  Serial.println(WiFi.localIP());
-}
-
-void reconnect() {
-  // 一直嘗試連線直到成功
-  while (!client.connected()) {
-    Serial.print("嘗試連接 MQTT 伺服器 (HiveMQ)...");
-    
-    // 產生一個隨機的 Client ID
-    String clientId = "ESP32Client-";
-    clientId += String(random(0xffff), HEX);
-    
-    if (client.connect(clientId.c_str())) {
-      Serial.println("連線成功！");
-      // 訂閱冷氣控制頻道
-      client.subscribe(mqtt_topic);
-      Serial.print("已訂閱頻道: ");
-      Serial.println(mqtt_topic);
-    } else {
-      Serial.print("失敗，錯誤代碼=");
-      Serial.print(client.state());
-      Serial.println("。將在 5 秒後重試...");
-      delay(5000);
-    }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi 初始連線成功！");
+    Serial.print("IP 位址: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi 初始連線超時，將在 loop() 中背景繼續嘗試...");
   }
 }
 
 void setup() {
+  // 0. 關閉低電壓偵測 (Brownout Detector)
+  // 避免 WiFi 重連的電流突波在 USB 供電不穩時觸發重啟，發出 USB 拔插音效
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+  
   Serial.begin(115200);
   
   // 初始化紅外線發射器
   ac.begin();
   rawSender.begin();
   
-  setup_wifi();
+  // 初始化軟體看門狗
+  initWatchdog();
+  
+  // 非阻塞 WiFi 初始化
+  setup_wifi_nonblocking();
   
   client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
+  
+  // 初始化時間標籤
+  setupTime = millis();
+  lastWiFiCheckTime = millis();
+  lastMqttConnectAttempt = 0;
+  lastHeapReportTime = millis();
 }
 
 void loop() {
-  if (!client.connected()) {
-    reconnect();
+  // 1. 餵狗：重設看門狗計時器
+  esp_task_wdt_reset();
+  
+  unsigned long currentMillis = millis();
+  
+  // 2. 定期自動重啟 (24 小時)，清除 Heap 記憶體碎片
+  if (currentMillis - setupTime >= REBOOT_INTERVAL_MS) {
+    Serial.println("已達到 24 小時定期自動重啟時間，系統重啟中...");
+    delay(1000);
+    ESP.restart();
   }
-  client.loop();
+  
+  // 3. 定期列印系統監控資訊 (每 30 秒)
+  if (currentMillis - lastHeapReportTime >= 30000) {
+    lastHeapReportTime = currentMillis;
+    Serial.print("[系統監控] 剩餘 Heap 記憶體: ");
+    Serial.print(ESP.getFreeHeap());
+    Serial.print(" Bytes | WiFi 狀態: ");
+    Serial.print(WiFi.status() == WL_CONNECTED ? "已連線" : "斷線");
+    Serial.print(" | MQTT 狀態: ");
+    Serial.println(client.connected() ? "已連線" : "斷線");
+  }
+  
+  // 4. WiFi 連線管理
+  if (WiFi.status() != WL_CONNECTED) {
+    // 每 10 秒手動觸發一次 WiFi.begin()，在背景嘗試重連，不重啟晶片
+    if (currentMillis - lastWiFiCheckTime >= 10000) {
+      lastWiFiCheckTime = currentMillis;
+      Serial.println("偵測到 WiFi 斷線，嘗試重新呼叫 WiFi.begin()...");
+      WiFi.begin(ssid, password);
+    }
+    
+    // WiFi 沒連上，直接結束 loop，下次重試 (不處理 MQTT，也不會發出 USB 重新連線音效)
+    return;
+  }
+  
+  // 5. MQTT 連線管理
+  if (!client.connected()) {
+    // 每 10 秒嘗試非阻塞式連接 MQTT，在背景重連，不重啟晶片
+    if (currentMillis - lastMqttConnectAttempt >= 10000) {
+      lastMqttConnectAttempt = currentMillis;
+      Serial.print("嘗試連接 MQTT 伺服器 (HiveMQ)...");
+      
+      String clientId = "ESP32Client-";
+      clientId += String(random(0xffff), HEX);
+      
+      if (client.connect(clientId.c_str())) {
+        Serial.println("MQTT 連線成功！");
+        client.subscribe(mqtt_topic);
+      } else {
+        Serial.print("MQTT 連線失敗，狀態碼: ");
+        Serial.println(client.state());
+      }
+    }
+  } else {
+    // 6. 正常處理 MQTT 訂閱與心跳
+    client.loop();
+  }
 }
