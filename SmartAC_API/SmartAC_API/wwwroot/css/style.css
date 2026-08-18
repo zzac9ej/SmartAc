@@ -1,60 +1,116 @@
-/* ── 預設主題（家裡）藍色系 ── */
+/* ══════════════════════════════════════════════════
+   🏠 預設主題（家裡）— 深色 + 冷藍
+   ══════════════════════════════════════════════════ */
 :root {
-    --bg-color: #121212;
-    --text-primary: #ffffff;
-    --text-secondary: #aaaaaa;
-    --glass-bg: #1e1e1e;
-    --border-color: #333333;
+    /* 背景 */
+    --bg-color:    #0f1117;
+    --bg-gradient: linear-gradient(160deg, #0f1117 0%, #0a1628 100%);
+
+    /* 文字 */
+    --text-primary:   #ffffff;
+    --text-secondary: #94a3b8;
+
+    /* 面板 */
+    --glass-bg:        #1a2235;
+    --border-color:    #263354;
+    --card-bg:         #1e2d45;
+    --schedule-time-color: #cbd5e1;
+
+    /* 輸入框 */
+    --input-bg:     #0a1628;
+    --input-border: #2d4a6e;
+    --input-color:  #ffffff;
+
+    /* 陰影 */
+    --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
 
     /* 主題強調色 */
-    --color-accent:       #0ea5e9;
-    --color-accent-press: #0284c7;
-    --color-accent-light: rgba(14, 165, 233, 0.15);
-    --color-accent-glow:  rgba(14, 165, 233, 0.35);
+    --color-accent:       #38bdf8;
+    --color-accent-press: #0ea5e9;
+    --color-accent-light: rgba(56, 189, 248, 0.15);
+    --color-accent-glow:  rgba(56, 189, 248, 0.4);
 
-    /* 大按鈕顏色 */
-    --color-on: #0ea5e9;       /* 藍色(開冷氣) */
-    --color-on-press: #0284c7;
-    --color-on-delay: #3b82f6; /* 靛色(稍後開) */
+    /* 大按鈕 */
+    --color-on:          #38bdf8;
+    --color-on-press:    #0ea5e9;
+    --color-on-delay:    #818cf8;
 
-    --color-off: #ef4444;      /* 紅色(關冷氣) */
-    --color-off-press: #dc2828;
-    --color-off-delay: #8b5cf6;/* 紫色(稍後關) */
+    --color-off:         #f87171;
+    --color-off-press:   #ef4444;
+    --color-off-delay:   #a78bfa;
+
+    /* 顏色變數補充（舊版相容） */
+    --color-primary: #38bdf8;
+    --color-text:    #ffffff;
 }
 
-/* ── 辦公室主題 橘琥珀色系 ── */
+/* ══════════════════════════════════════════════════
+   🏢 辦公室主題 — 淺色 + 深青綠（白天工作感）
+   ══════════════════════════════════════════════════ */
 body.theme-office {
-    --color-accent:       #f59e0b;
-    --color-accent-press: #d97706;
-    --color-accent-light: rgba(245, 158, 11, 0.15);
-    --color-accent-glow:  rgba(245, 158, 11, 0.35);
+    /* 背景 */
+    --bg-color:    #f0f4f8;
+    --bg-gradient: linear-gradient(160deg, #e8f4fd 0%, #dbeafe 60%, #ede9fe 100%);
 
-    --color-on:       #f59e0b;
-    --color-on-press: #d97706;
-    --color-on-delay: #fb923c;
+    /* 文字 */
+    --text-primary:   #0f172a;
+    --text-secondary: #64748b;
 
-    --bg-color:    #141210;
-    --glass-bg:    #1e1a14;
-    --border-color:#3a3020;
+    /* 面板 */
+    --glass-bg:        #ffffff;
+    --border-color:    #cbd5e1;
+    --card-bg:         #f8fafc;
+    --schedule-time-color: #475569;
+
+    /* 輸入框 */
+    --input-bg:     #f1f5f9;
+    --input-border: #94a3b8;
+    --input-color:  #0f172a;
+
+    /* 陰影 */
+    --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.08);
+    --shadow-lg: 0 4px 20px rgba(15, 23, 42, 0.12);
+
+    /* 主題強調色 */
+    --color-accent:       #0f766e;
+    --color-accent-press: #0d6b63;
+    --color-accent-light: rgba(15, 118, 110, 0.1);
+    --color-accent-glow:  rgba(15, 118, 110, 0.2);
+
+    /* 大按鈕 */
+    --color-on:          #0f766e;
+    --color-on-press:    #0d6b63;
+    --color-on-delay:    #0284c7;
+
+    --color-off:         #dc2626;
+    --color-off-press:   #b91c1c;
+    --color-off-delay:   #7c3aed;
+
+    --color-primary: #0f766e;
+    --color-text:    #0f172a;
 }
 
+/* ══════════════════════════════════════════════════
+   全域重設
+   ══════════════════════════════════════════════════ */
 * {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
-    /* 停用長按選取，避免長輩誤觸文字反白 */
     -webkit-user-select: none;
     user-select: none;
 }
 
 body {
-    font-family: 'Noto Sans TC', sans-serif; /* 使用思源黑體，字體更清晰 */
-    background-color: var(--bg-color);
+    font-family: 'Noto Sans TC', sans-serif;
+    background: var(--bg-gradient);
+    background-attachment: fixed;
     color: var(--text-primary);
     min-height: 100vh;
     padding: 1rem;
-    /* 避免 iPhone 下方選單列遮擋 */
     padding-bottom: env(safe-area-inset-bottom);
+    transition: background 0.4s ease, color 0.4s ease;
 }
 
 .app-container {
@@ -74,7 +130,7 @@ body {
     letter-spacing: 2px;
 }
 
-/* 遙控器大按鈕網格 */
+/* ── 遙控器大按鈕 ── */
 .remote-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -92,41 +148,33 @@ body {
     padding: 2rem 1rem;
     color: white;
     cursor: pointer;
-    box-shadow: 0 8px 16px rgba(0,0,0,0.4);
+    box-shadow: var(--shadow-lg);
     transition: transform 0.1s, filter 0.1s;
 }
 
-/* 點擊時下壓的動畫 */
 .mega-btn:active {
     transform: scale(0.95) translateY(4px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-    filter: brightness(0.8);
+    box-shadow: var(--shadow-sm);
+    filter: brightness(0.85);
 }
 
-.mega-btn .icon {
-    font-size: 3rem;
-    margin-bottom: 0.5rem;
-}
+.mega-btn .icon  { font-size: 3rem; margin-bottom: 0.5rem; }
+.mega-btn .title { font-size: 1.5rem; font-weight: 700; }
 
-.mega-btn .title {
-    font-size: 1.5rem;
-    font-weight: 700;
-}
+.btn-on       { background: linear-gradient(145deg, #67e8f9, var(--color-on)); }
+.btn-on-delay { background: linear-gradient(145deg, #a5b4fc, var(--color-on-delay)); }
+.btn-off      { background: linear-gradient(145deg, #fca5a5, var(--color-off)); }
+.btn-off-delay{ background: linear-gradient(145deg, #c4b5fd, var(--color-off-delay)); }
 
-.btn-on { background: linear-gradient(145deg, #38bdf8, var(--color-on)); }
-.btn-on-delay { background: linear-gradient(145deg, #60a5fa, var(--color-on-delay)); }
-.btn-off { background: linear-gradient(145deg, #f87171, var(--color-off)); }
-.btn-off-delay { background: linear-gradient(145deg, #a78bfa, var(--color-off-delay)); }
-
-
-
-/* 指定時間與清單共用的區塊樣式 */
+/* ── 面板通用 ── */
 .glass-panel {
     background: var(--glass-bg);
     border: 1px solid var(--border-color);
     border-radius: 16px;
     padding: 1.5rem;
     margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.4s ease, border-color 0.4s ease;
 }
 
 .glass-panel h2 {
@@ -135,21 +183,20 @@ body {
     margin-bottom: 1rem;
 }
 
-/* 指定時間區 */
-.time-picker-row {
-    margin-bottom: 1rem;
-}
+/* ── 時間選擇 ── */
+.time-picker-row { margin-bottom: 1rem; }
 
 .massive-input {
     width: 100%;
-    background: #000;
-    border: 2px solid #555;
-    color: white;
-    font-size: 2.5rem; /* 超大時間選擇器 */
+    background: var(--input-bg);
+    border: 2px solid var(--input-border);
+    color: var(--input-color);
+    font-size: 2.5rem;
     font-weight: 700;
     text-align: center;
     padding: 0.5rem;
     border-radius: 12px;
+    transition: background 0.4s, border-color 0.4s, color 0.4s;
 }
 
 .time-action-row {
@@ -165,18 +212,15 @@ body {
     font-size: 1.3rem;
     font-weight: 700;
     color: white;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    box-shadow: var(--shadow-sm);
+    font-family: 'Noto Sans TC', sans-serif;
 }
+.mega-btn-small:active { transform: scale(0.95); }
 
-.mega-btn-small:active {
-    transform: scale(0.95);
-}
-
-.btn-on-small { background: var(--color-on); }
+.btn-on-small  { background: var(--color-on); }
 .btn-off-small { background: var(--color-off); }
 
-
-/* 排程清單 */
+/* ── 排程清單 ── */
 .panel-header {
     display: flex;
     justify-content: space-between;
@@ -191,10 +235,7 @@ body {
     color: var(--text-primary);
     padding: 0.5rem;
 }
-
-.icon-btn:active {
-    transform: rotate(180deg);
-}
+.icon-btn:active { transform: rotate(180deg); }
 
 .schedule-list {
     display: flex;
@@ -203,12 +244,15 @@ body {
 }
 
 .schedule-card {
-    background: #2a2a2a;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
     border-radius: 12px;
     padding: 1.2rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.4s, border-color 0.4s;
 }
 
 .schedule-info {
@@ -217,16 +261,14 @@ body {
     gap: 0.4rem;
 }
 
-.badge {
-    font-size: 1.2rem;
-    font-weight: 900;
-}
-.badge-on { color: var(--color-on); }
+.badge { font-size: 1.2rem; font-weight: 900; }
+.badge-on  { color: var(--color-on); }
 .badge-off { color: var(--color-off); }
 
 .schedule-time {
     font-size: 1.2rem;
-    color: #e2e8f0;
+    color: var(--schedule-time-color);
+    transition: color 0.4s;
 }
 
 .delete-btn {
@@ -237,7 +279,8 @@ body {
     font-size: 1.2rem;
     font-weight: 700;
     border-radius: 8px;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    box-shadow: var(--shadow-sm);
+    font-family: 'Noto Sans TC', sans-serif;
 }
 .delete-btn:active {
     transform: scale(0.95);
@@ -251,15 +294,13 @@ body {
     padding: 2rem 0;
 }
 
-/* 全螢幕遮罩 Loading */
+/* ── 全螢幕 Loading ── */
 #fullscreen-loader {
     position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(5px);
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(6px);
     z-index: 9999;
     display: flex;
     flex-direction: column;
@@ -267,7 +308,6 @@ body {
     align-items: center;
     color: white;
 }
-
 #fullscreen-loader p {
     margin-top: 1rem;
     font-size: 1.5rem;
@@ -275,15 +315,14 @@ body {
 }
 
 .spinner {
-    width: 60px;
-    height: 60px;
+    width: 60px; height: 60px;
     border: 6px solid rgba(255,255,255,0.2);
     border-top-color: var(--color-accent);
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 
-/* 提示訊息 Toast */
+/* ── Toast 提示 ── */
 .toast {
     position: fixed;
     top: 20px;
@@ -296,23 +335,16 @@ body {
     font-weight: 700;
     border-radius: 30px;
     z-index: 10000;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.3);
     transition: opacity 0.3s;
 }
+.toast.error { background: var(--color-off); }
 
-.toast.error {
-    background: var(--color-off);
-}
+.hidden { display: none !important; }
 
-.hidden {
-    display: none !important;
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 
-@keyframes spin {
-    to { transform: rotate(360deg); }
-}
-
-/* ── 錯誤頁面 (index.html / 驗證失敗時) ── */
+/* ── 錯誤頁面 ── */
 .error-page {
     display: flex;
     flex-direction: column;
@@ -329,7 +361,7 @@ body {
 /* ── GUEST 房間標示 ── */
 .room-badge {
     display: inline-block;
-    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    background: linear-gradient(135deg, var(--color-accent), var(--color-accent-press));
     color: #fff;
     font-size: 0.9rem;
     font-weight: 900;
@@ -337,10 +369,12 @@ body {
     border-radius: 20px;
     letter-spacing: 1px;
     margin-bottom: 0.5rem;
+    transition: background 0.4s;
 }
 
-/* 顏色變數補充 */
-:root {
-    --color-primary: #0ea5e9;
-    --color-text:    #ffffff;
+/* 辦公室淺色主題額外覆寫（無法純靠變數的部分） */
+body.theme-office .mega-btn { color: white; }
+
+body.theme-office #fullscreen-loader {
+    background: rgba(15, 23, 42, 0.6);
 }
