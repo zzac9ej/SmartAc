@@ -16,14 +16,15 @@ public class MqttService : IMqttService
         _logger = logger;
     }
 
-    public async Task<bool> PublishCommandAsync(string command, int? temperature = null)
+    public async Task<bool> PublishCommandAsync(string command, int? temperature = null, string? mqttTopic = null)
     {
         var mqttFactory = new MqttFactory();
         using var mqttClient = mqttFactory.CreateMqttClient();
 
         var broker = _config["MQTT:Broker"] ?? "broker.hivemq.com";
         var port = _config.GetValue<int>("MQTT:Port", 1883);
-        var topic = _config["MQTT:Topic"] ?? "home/livingroom/ac";
+        // 若呼叫者有指定 topic（例如依房間查到的），優先使用；否則 fallback 到設定檔預設值
+        var topic = mqttTopic ?? _config["MQTT:Topic"] ?? "home/livingroom/ac";
 
         var mqttOptions = new MqttClientOptionsBuilder()
             .WithTcpServer(broker, port)
@@ -48,6 +49,7 @@ public class MqttService : IMqttService
             await mqttClient.PublishAsync(message);
             await mqttClient.DisconnectAsync();
 
+            _logger.LogInformation("MQTT published to topic '{Topic}': {Command}", topic, command);
             return true;
         }
         catch (Exception ex)

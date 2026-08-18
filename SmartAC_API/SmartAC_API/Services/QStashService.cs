@@ -17,7 +17,7 @@ public class QStashService : IQStashService
         _logger = logger;
     }
 
-    public async Task<string?> ScheduleActionAsync(string action, DateTime? targetTimeUtc, int? temperature = null)
+    public async Task<string?> ScheduleActionAsync(string action, DateTime? targetTimeUtc, int? temperature = null, string? roomId = null)
     {
         var qstashToken = _config["QStash:Token"];
         var callbackUrl = _config["QStash:CallbackUrl"];
@@ -31,9 +31,16 @@ public class QStashService : IQStashService
         
         var qstashUrl = $"{qstashBaseUrl}/v2/publish/{callbackUrl}";
         
-        object payloadData = temperature.HasValue 
-            ? new { Action = action, Temperature = temperature.Value }
-            : new { Action = action };
+        // 把 RoomId 一起帶入 callback body，讓 callback 時知道要控制哪個房間
+        object payloadData;
+        if (temperature.HasValue && !string.IsNullOrEmpty(roomId))
+            payloadData = new { Action = action, Temperature = temperature.Value, RoomId = roomId };
+        else if (temperature.HasValue)
+            payloadData = new { Action = action, Temperature = temperature.Value };
+        else if (!string.IsNullOrEmpty(roomId))
+            payloadData = new { Action = action, RoomId = roomId };
+        else
+            payloadData = new { Action = action };
             
         var payload = JsonSerializer.Serialize(payloadData);
         var content = new StringContent(payload);

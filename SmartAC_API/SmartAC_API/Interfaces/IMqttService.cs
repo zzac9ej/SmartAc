@@ -2,5 +2,5 @@ namespace SmartAC_API.Interfaces;
 
 public interface IMqttService
 {
-    Task<bool> PublishCommandAsync(string command, int? temperature = null);
+    Task<bool> PublishCommandAsync(string command, int? temperature = null, string? mqttTopic = null);
 }

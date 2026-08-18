@@ -287,3 +287,36 @@ body {
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
+
+/* ── 錯誤頁面 (index.html / 驗證失敗時) ── */
+.error-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 80vh;
+    text-align: center;
+    gap: 1.5rem;
+}
+.error-icon  { font-size: 5rem; }
+.error-title { font-size: 2rem; font-weight: 900; color: var(--text-primary); }
+.error-desc  { font-size: 1.2rem; color: var(--text-secondary); line-height: 1.8; }
+
+/* ── GUEST 房間標示 ── */
+.room-badge {
+    display: inline-block;
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 900;
+    padding: 0.3rem 1rem;
+    border-radius: 20px;
+    letter-spacing: 1px;
+    margin-bottom: 0.5rem;
+}
+
+/* 顏色變數補充 */
+:root {
+    --color-primary: #0ea5e9;
+    --color-text:    #ffffff;
+}

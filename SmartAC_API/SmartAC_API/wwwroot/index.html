@@ -2,88 +2,37 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>冷氣遙控器</title>
-    <meta name="description" content="長輩友善版的智慧冷氣遙控器">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@500;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .error-page {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 80vh;
+            text-align: center;
+            gap: 1.5rem;
+        }
+        .error-icon { font-size: 5rem; }
+        .error-title { font-size: 2rem; font-weight: 900; color: var(--text-primary); }
+        .error-desc { font-size: 1.2rem; color: var(--text-secondary); line-height: 1.8; }
+    </style>
 </head>
 <body>
-    <!-- 全螢幕載入畫面 -->
-    <div id="fullscreen-loader" class="hidden">
-        <div class="spinner"></div>
-        <p>正在發送指令...</p>
-    </div>
-
-    <!-- 成功/失敗提示框 -->
-    <div id="toast" class="toast hidden"></div>
-
     <main class="app-container">
-        <header class="app-header">
-            <h1>冷氣遙控器</h1>
-        </header>
-
-        <!-- 溫度設定區 -->
-        <section class="temperature-panel glass-panel" style="text-align: center; margin-bottom: 20px;">
-            <h2 style="margin-bottom: 15px;">🌡️ 溫度設定</h2>
-            <div style="display: flex; justify-content: center; align-items: center; gap: 20px;">
-                <button id="btn-temp-down" class="icon-btn" style="width: 60px; height: 60px; font-size: 24px;">➖</button>
-                <div style="font-size: 48px; font-weight: 900; color: var(--color-primary);">
-                    <span id="temp-value">27</span><span style="font-size: 24px; color: var(--color-text);">°C</span>
-                </div>
-                <button id="btn-temp-up" class="icon-btn" style="width: 60px; height: 60px; font-size: 24px;">➕</button>
+        <div class="error-page">
+            <div class="error-icon">🔒</div>
+            <div class="error-title">請使用正確的連結</div>
+            <div class="error-desc">
+                此頁面需要透過專屬連結存取。<br>
+                請聯繫管理員取得連結。
             </div>
-        </section>
-
-        <!-- 遙控器大按鈕區 -->
-        <section class="remote-grid">
-            <button class="mega-btn btn-on" data-action="turn_on" data-delay="0">
-                <span class="icon">❄️</span>
-                <span class="title">馬上開</span>
-            </button>
-            
-            <button class="mega-btn btn-off-delay" data-action="turn_off" data-delay="60">
-                <span class="icon">💤</span>
-                <span class="title">1小時後關</span>
-            </button>
-
-            <button class="mega-btn btn-off" data-action="turn_off" data-delay="0">
-                <span class="icon">🛑</span>
-                <span class="title">馬上關</span>
-            </button>
-            
-            <button class="mega-btn btn-off-delay" data-action="turn_off" data-delay="120">
-                <span class="icon">💤</span>
-                <span class="title">2小時後關</span>
-            </button>
-        </section>
-
-        <!-- 指定時間區 -->
-        <section class="custom-time-panel glass-panel">
-            <h2>⏰ 指定時間</h2>
-            <div class="time-picker-row">
-                <input type="time" id="custom-time" class="massive-input">
-            </div>
-            <div class="time-action-row">
-                <button id="btn-custom-on" class="mega-btn-small btn-on-small">開冷氣</button>
-                <button id="btn-custom-off" class="mega-btn-small btn-off-small">關冷氣</button>
-            </div>
-        </section>
-
-        <!-- 等待中的排程清單 -->
-        <section class="schedule-panel glass-panel">
-            <div class="panel-header">
-                <h2>📋 準備執行的動作</h2>
-                <button id="refresh-btn" class="icon-btn">🔄</button>
-            </div>
-            <div id="schedule-list" class="schedule-list">
-                <!-- 內容由 JS 動態產生 -->
-            </div>
-        </section>
+        </div>
     </main>
-
-    <script src="/js/app.js"></script>
 </body>
 </html>
