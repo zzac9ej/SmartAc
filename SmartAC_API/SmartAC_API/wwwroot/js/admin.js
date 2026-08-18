@@ -56,8 +56,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function switchRoom(roomId) {
         activeRoomId = roomId;
+        // 切換主題色調
+        document.body.classList.toggle('theme-office', roomId === 'office');
         renderTabs();
-        loadSchedules(); // 切換房間時重新載入排程
+        loadSchedules();
     }
 
     renderTabs();

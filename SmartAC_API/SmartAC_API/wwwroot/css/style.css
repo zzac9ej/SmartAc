@@ -1,18 +1,41 @@
+/* ── 預設主題（家裡）藍色系 ── */
 :root {
     --bg-color: #121212;
     --text-primary: #ffffff;
     --text-secondary: #aaaaaa;
     --glass-bg: #1e1e1e;
     --border-color: #333333;
-    
+
+    /* 主題強調色 */
+    --color-accent:       #0ea5e9;
+    --color-accent-press: #0284c7;
+    --color-accent-light: rgba(14, 165, 233, 0.15);
+    --color-accent-glow:  rgba(14, 165, 233, 0.35);
+
     /* 大按鈕顏色 */
     --color-on: #0ea5e9;       /* 藍色(開冷氣) */
     --color-on-press: #0284c7;
     --color-on-delay: #3b82f6; /* 靛色(稍後開) */
-    
+
     --color-off: #ef4444;      /* 紅色(關冷氣) */
     --color-off-press: #dc2828;
     --color-off-delay: #8b5cf6;/* 紫色(稍後關) */
+}
+
+/* ── 辦公室主題 橘琥珀色系 ── */
+body.theme-office {
+    --color-accent:       #f59e0b;
+    --color-accent-press: #d97706;
+    --color-accent-light: rgba(245, 158, 11, 0.15);
+    --color-accent-glow:  rgba(245, 158, 11, 0.35);
+
+    --color-on:       #f59e0b;
+    --color-on-press: #d97706;
+    --color-on-delay: #fb923c;
+
+    --bg-color:    #141210;
+    --glass-bg:    #1e1a14;
+    --border-color:#3a3020;
 }
 
 * {
@@ -94,6 +117,7 @@ body {
 .btn-on-delay { background: linear-gradient(145deg, #60a5fa, var(--color-on-delay)); }
 .btn-off { background: linear-gradient(145deg, #f87171, var(--color-off)); }
 .btn-off-delay { background: linear-gradient(145deg, #a78bfa, var(--color-off-delay)); }
+
 
 
 /* 指定時間與清單共用的區塊樣式 */
@@ -254,7 +278,7 @@ body {
     width: 60px;
     height: 60px;
     border: 6px solid rgba(255,255,255,0.2);
-    border-top-color: var(--color-on);
+    border-top-color: var(--color-accent);
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }

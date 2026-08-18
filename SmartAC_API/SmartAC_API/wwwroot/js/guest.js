@@ -22,6 +22,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         roomId = data.roomId;
         roomBadge.textContent = `🏢 ${data.roomName}`;
         document.title = `${data.roomName} 冷氣遙控器`;
+        // 套用辦公室主題（橘色系）
+        document.body.classList.add('theme-office');
     } catch {
         errorPage.classList.remove('hidden');
         return; // 停止後續初始化
