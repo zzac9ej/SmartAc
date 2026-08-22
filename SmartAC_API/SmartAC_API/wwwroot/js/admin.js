@@ -80,7 +80,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnTempUp       = document.getElementById('btn-temp-up');
     const btnTempDown     = document.getElementById('btn-temp-down');
 
-    let currentTemp = 27;
+    let currentTemp = (activeRoomId === 'office') ? 25 : 27;
+    tempValue.innerText = currentTemp;
 
     // ── 5. 溫度控制 ──────────────────────────────────────────────────────────
     let tempTimeout;
