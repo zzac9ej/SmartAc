@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnTempDown    = document.getElementById('btn-temp-down');
 
     let currentTemp = 25; // 辦公室預設 25°C
+    tempValue.innerText = currentTemp;
 
     // ── 4. 溫度控制 ──────────────────────────────────────────────────────────
     let tempTimeout;
