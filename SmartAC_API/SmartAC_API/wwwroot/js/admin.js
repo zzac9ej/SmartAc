@@ -58,6 +58,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         activeRoomId = roomId;
         // 切換主題色調
         document.body.classList.toggle('theme-office', roomId === 'office');
+        // 切換房間時重設預設溫度
+        currentTemp = (roomId === 'office') ? 25 : 27;
+        tempValue.innerText = currentTemp;
         renderTabs();
         loadSchedules();
     }
