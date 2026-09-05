@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // ── 2. 驗證身份 ──────────────────────────────────────────────────────────
     let roomId = '';
+    let initialServerTemp = null;
     try {
         const res = await fetch(`/api/auth/me?token=${encodeURIComponent(token)}`);
         if (!res.ok) throw new Error('Unauthorized');
@@ -20,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (data.role !== 'guest') throw new Error('Not a guest token');
 
         roomId = data.roomId;
+        initialServerTemp = data.temperature;
         roomBadge.textContent = `🏢 ${data.roomName}`;
         document.title = `${data.roomName} 冷氣遙控器`;
         // 套用辦公室主題（橘色系）
@@ -45,16 +47,42 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnTempUp      = document.getElementById('btn-temp-up');
     const btnTempDown    = document.getElementById('btn-temp-down');
 
-    let currentTemp = 25; // 辦公室預設 25°C
+    // ── 4. 溫度控制（支援伺服器全員同步與 localStorage 本地快取）─────────────────
+    function getSavedTemp(rId) {
+        if (initialServerTemp && initialServerTemp >= 18 && initialServerTemp <= 30) {
+            saveTemp(rId, initialServerTemp);
+            return initialServerTemp;
+        }
+        try {
+            const saved = localStorage.getItem(`smartac_temp_${rId}`);
+            if (saved !== null) {
+                const val = parseInt(saved, 10);
+                if (!isNaN(val) && val >= 18 && val <= 30) return val;
+            }
+        } catch (e) {
+            console.warn('localStorage read error:', e);
+        }
+        return 25; // 辦公室預設 25°C
+    }
+
+    function saveTemp(rId, temp) {
+        try {
+            localStorage.setItem(`smartac_temp_${rId}`, temp);
+        } catch (e) {
+            console.warn('localStorage write error:', e);
+        }
+    }
+
+    let currentTemp = getSavedTemp(roomId);
     tempValue.innerText = currentTemp;
 
-    // ── 4. 溫度控制 ──────────────────────────────────────────────────────────
     let tempTimeout;
 
     btnTempUp.addEventListener('click', () => {
         if (currentTemp < 30) {
             currentTemp++;
             tempValue.innerText = currentTemp;
+            saveTemp(roomId, currentTemp);
             clearTimeout(tempTimeout);
             tempTimeout = setTimeout(() => {
                 sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
@@ -66,6 +94,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (currentTemp > 18) {
             currentTemp--;
             tempValue.innerText = currentTemp;
+            saveTemp(roomId, currentTemp);
             clearTimeout(tempTimeout);
             tempTimeout = setTimeout(() => {
                 sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
@@ -121,11 +150,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // ── 8. 載入排程清單 ───────────────────────────────────────────────────────
+    // ── 8. 載入排程清單與同步溫度 ───────────────────────────────────────────
     async function loadSchedules() {
         try {
             const response = await fetch(`/api/schedules?token=${encodeURIComponent(token)}`);
             if (!response.ok) throw new Error('Failed to load');
+
+            // 檢查伺服器端最新同步溫度（若當前沒有在連點調整，則同步更新）
+            const serverTemp = response.headers.get('X-Room-Temperature');
+            if (serverTemp && !tempTimeout) {
+                const parsed = parseInt(serverTemp, 10);
+                if (!isNaN(parsed) && parsed >= 18 && parsed <= 30 && parsed !== currentTemp) {
+                    currentTemp = parsed;
+                    tempValue.innerText = currentTemp;
+                    saveTemp(roomId, currentTemp);
+                }
+            }
+
             const list = await response.json();
             renderSchedules(list);
         } catch (error) {
@@ -204,4 +245,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     refreshBtn.addEventListener('click', loadSchedules);
     loadSchedules();
+
+    // ── 9. 全員即時同步（切換回分頁立刻刷新、定時 10 秒背景輪詢） ───────────────
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            loadSchedules();
+        }
+    });
+    setInterval(loadSchedules, 10000);
 });

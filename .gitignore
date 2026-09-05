@@ -56,3 +56,9 @@ project.lock.json
 
 # AppSettings (prevent pushing secrets)
 appsettings.json
+
+# Runtime state files
+room_states.json
+
+# Archive files
+*.zip

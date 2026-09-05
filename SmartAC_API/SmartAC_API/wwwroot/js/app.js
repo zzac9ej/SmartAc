@@ -10,38 +10,63 @@ document.addEventListener('DOMContentLoaded', () => {
     const loader = document.getElementById('fullscreen-loader');
     const toast = document.getElementById('toast');
 
-    // 溫度控制邏輯
+    // 溫度控制邏輯（支援 localStorage 記憶溫度）
     const tempValue = document.getElementById('temp-value');
     const btnTempUp = document.getElementById('btn-temp-up');
     const btnTempDown = document.getElementById('btn-temp-down');
-    let currentTemp = 27;
 
-        let tempTimeout;
-        
-        btnTempUp.addEventListener('click', () => {
-            if (currentTemp < 30) {
-                currentTemp++;
-                tempValue.innerText = currentTemp;
-                
-                // 模擬真實遙控器：停頓 0.5 秒後自動發送訊號
-                clearTimeout(tempTimeout);
-                tempTimeout = setTimeout(() => {
-                    sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
-                }, 500);
+    function getSavedTemp() {
+        try {
+            const saved = localStorage.getItem('smartac_temp');
+            if (saved !== null) {
+                const val = parseInt(saved, 10);
+                if (!isNaN(val) && val >= 18 && val <= 30) return val;
             }
-        });
-        
-        btnTempDown.addEventListener('click', () => {
-            if (currentTemp > 18) {
-                currentTemp--;
-                tempValue.innerText = currentTemp;
-                
-                clearTimeout(tempTimeout);
-                tempTimeout = setTimeout(() => {
-                    sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
-                }, 500);
-            }
-        });
+        } catch (e) {
+            console.warn('localStorage read error:', e);
+        }
+        return 27;
+    }
+
+    function saveTemp(temp) {
+        try {
+            localStorage.setItem('smartac_temp', temp);
+        } catch (e) {
+            console.warn('localStorage write error:', e);
+        }
+    }
+
+    let currentTemp = getSavedTemp();
+    tempValue.innerText = currentTemp;
+
+    let tempTimeout;
+    
+    btnTempUp.addEventListener('click', () => {
+        if (currentTemp < 30) {
+            currentTemp++;
+            tempValue.innerText = currentTemp;
+            saveTemp(currentTemp);
+            
+            // 模擬真實遙控器：停頓 0.5 秒後自動發送訊號
+            clearTimeout(tempTimeout);
+            tempTimeout = setTimeout(() => {
+                sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
+            }, 500);
+        }
+    });
+    
+    btnTempDown.addEventListener('click', () => {
+        if (currentTemp > 18) {
+            currentTemp--;
+            tempValue.innerText = currentTemp;
+            saveTemp(currentTemp);
+            
+            clearTimeout(tempTimeout);
+            tempTimeout = setTimeout(() => {
+                sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
+            }, 500);
+        }
+    });
 
     // 1. 綁定大按鈕點擊事件 (延遲開/關)
     megaBtns.forEach(btn => {
@@ -93,11 +118,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // 載入與繪製排程清單
+    // 載入與繪製排程清單（同步最新溫度）
     async function loadSchedules() {
         try {
             const response = await fetch('/api/schedules');
             if (!response.ok) throw new Error('Failed to load');
+
+            // 檢查伺服器端最新同步溫度
+            const serverTemp = response.headers.get('X-Room-Temperature');
+            if (serverTemp && !tempTimeout) {
+                const parsed = parseInt(serverTemp, 10);
+                if (!isNaN(parsed) && parsed >= 18 && parsed <= 30 && parsed !== currentTemp) {
+                    currentTemp = parsed;
+                    tempValue.innerText = currentTemp;
+                    saveTemp(currentTemp);
+                }
+            }
             
             const list = await response.json();
             renderSchedules(list);
@@ -200,4 +236,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 初始載入
     loadSchedules();
+
+    // 全員即時同步（切換回分頁立刻刷新、定時 10 秒背景輪詢）
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            loadSchedules();
+        }
+    });
+    setInterval(loadSchedules, 10000);
 });

@@ -11,6 +11,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     const roomTabsEl       = document.getElementById('room-tabs');
     const currentRoomLabel = document.getElementById('current-room-label');
 
+    // ── 溫度記憶輔助函式 ───────────────────────────────────────────────────
+    function getSavedTemp(rId) {
+        const defaultTemp = (rId === 'office') ? 25 : 27;
+        try {
+            const saved = localStorage.getItem(`smartac_temp_${rId}`);
+            if (saved !== null) {
+                const val = parseInt(saved, 10);
+                if (!isNaN(val) && val >= 18 && val <= 30) return val;
+            }
+        } catch (e) {
+            console.warn('localStorage read error:', e);
+        }
+        return defaultTemp;
+    }
+
+    function saveTemp(rId, temp) {
+        try {
+            localStorage.setItem(`smartac_temp_${rId}`, temp);
+        } catch (e) {
+            console.warn('localStorage write error:', e);
+        }
+    }
+
     // ── 2. 驗證身份 ──────────────────────────────────────────────────────────
     let rooms    = [];
     let activeRoomId = '';
@@ -22,8 +45,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (data.role !== 'admin') throw new Error('Not an admin token');
 
-        rooms        = data.rooms; // [{id, name}, ...]
+        rooms        = data.rooms; // [{id, name, temperature}, ...]
         activeRoomId = rooms[0]?.id ?? '';
+
+        // 伺服器端各房間最新溫度寫入本地快取
+        rooms.forEach(r => {
+            if (r.temperature && r.temperature >= 18 && r.temperature <= 30) {
+                saveTemp(r.id, r.temperature);
+            }
+        });
     } catch {
         errorPage.classList.remove('hidden');
         return;
@@ -58,8 +88,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         activeRoomId = roomId;
         // 切換主題色調
         document.body.classList.toggle('theme-office', roomId === 'office');
-        // 切換房間時重設預設溫度
-        currentTemp = (roomId === 'office') ? 25 : 27;
+        // 切換房間時讀取該房間上次設定的溫度，若無則使用預設溫度
+        currentTemp = getSavedTemp(roomId);
         tempValue.innerText = currentTemp;
         renderTabs();
         loadSchedules();
@@ -80,7 +110,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const btnTempUp       = document.getElementById('btn-temp-up');
     const btnTempDown     = document.getElementById('btn-temp-down');
 
-    let currentTemp = (activeRoomId === 'office') ? 25 : 27;
+    let currentTemp = getSavedTemp(activeRoomId);
     tempValue.innerText = currentTemp;
 
     // ── 5. 溫度控制 ──────────────────────────────────────────────────────────
@@ -90,6 +120,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (currentTemp < 30) {
             currentTemp++;
             tempValue.innerText = currentTemp;
+            saveTemp(activeRoomId, currentTemp);
             clearTimeout(tempTimeout);
             tempTimeout = setTimeout(() => {
                 sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
@@ -101,6 +132,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (currentTemp > 18) {
             currentTemp--;
             tempValue.innerText = currentTemp;
+            saveTemp(activeRoomId, currentTemp);
             clearTimeout(tempTimeout);
             tempTimeout = setTimeout(() => {
                 sendScheduleRequest({ Action: 'turn_on', DelayMinutes: 0, Temperature: currentTemp }, true);
@@ -154,7 +186,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // ── 9. 載入排程清單 ───────────────────────────────────────────────────────
+    // ── 9. 載入排程清單與同步溫度 ───────────────────────────────────────────
     async function loadSchedules() {
         try {
             // ADMIN 傳 roomId 只看當前地點的排程
@@ -162,6 +194,18 @@ document.addEventListener('DOMContentLoaded', async () => {
                 `/api/schedules?token=${encodeURIComponent(token)}&roomId=${encodeURIComponent(activeRoomId)}`
             );
             if (!response.ok) throw new Error('Failed to load');
+
+            // 檢查伺服器端最新同步溫度（若當前沒有在連點調整，則同步更新）
+            const serverTemp = response.headers.get('X-Room-Temperature');
+            if (serverTemp && !tempTimeout) {
+                const parsed = parseInt(serverTemp, 10);
+                if (!isNaN(parsed) && parsed >= 18 && parsed <= 30 && parsed !== currentTemp) {
+                    currentTemp = parsed;
+                    tempValue.innerText = currentTemp;
+                    saveTemp(activeRoomId, currentTemp);
+                }
+            }
+
             const list = await response.json();
             renderSchedules(list);
         } catch (error) {
@@ -240,4 +284,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     refreshBtn.addEventListener('click', loadSchedules);
     loadSchedules();
+
+    // ── 10. 全員即時同步（切換回分頁立刻刷新、定時 10 秒背景輪詢） ──────────────
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+            loadSchedules();
+        }
+    });
+    setInterval(loadSchedules, 10000);
 });

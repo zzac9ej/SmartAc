@@ -3,6 +3,7 @@ using SmartAC_API.Dtos;
 using SmartAC_API.Interfaces;
 using SmartAC_API.Models;
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace SmartAC_API.Endpoints;
 
@@ -19,6 +20,52 @@ public static class AcEndpoints
 {
     // 簡單的記憶體儲存 (伺服器重開會清空，但這對於個人用途已經足夠)
     private static readonly ConcurrentDictionary<string, ScheduledRecord> _schedules = new();
+
+    // ── 伺服器端房間溫度持久化儲存（全員同步） ──
+    private static readonly string _stateFilePath = Path.Combine(AppContext.BaseDirectory, "room_states.json");
+    private static readonly ConcurrentDictionary<string, int> _roomTemperatures = LoadRoomStates();
+
+    private static ConcurrentDictionary<string, int> LoadRoomStates()
+    {
+        var dict = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["office"] = 25,
+            ["home"] = 27
+        };
+        try
+        {
+            if (File.Exists(_stateFilePath))
+            {
+                var json = File.ReadAllText(_stateFilePath);
+                var loaded = JsonSerializer.Deserialize<Dictionary<string, int>>(json);
+                if (loaded != null)
+                {
+                    foreach (var kvp in loaded)
+                    {
+                        dict[kvp.Key] = kvp.Value;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[State] Load error: {ex.Message}");
+        }
+        return dict;
+    }
+
+    private static void SaveRoomStates()
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(_roomTemperatures);
+            File.WriteAllText(_stateFilePath, json);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[State] Save error: {ex.Message}");
+        }
+    }
 
     public static void MapAcEndpoints(this IEndpointRouteBuilder app)
     {
@@ -55,7 +102,7 @@ public static class AcEndpoints
             rooms.FirstOrDefault(r => r.Id == roomId)?.MqttTopic;
 
         // ─────────────────────────────────────────────────────────────────────
-        // 0. 身份驗證端點：前端載入頁面時呼叫，確認 token 角色
+        // 0. 身份驗證端點：前端載入頁面時呼叫，確認 token 角色與目前各房間溫度
         // ─────────────────────────────────────────────────────────────────────
         app.MapGet("/api/auth/me", ([FromQuery] string token, IConfiguration config) =>
         {
@@ -71,11 +118,16 @@ public static class AcEndpoints
             if (role == "guest")
             {
                 var roomName = rooms.FirstOrDefault(r => r.Id == roomId)?.Name ?? roomId;
-                return Results.Ok(new { role, roomId, roomName });
+                var temp = _roomTemperatures.GetOrAdd(roomId, r => r.Equals("office", StringComparison.OrdinalIgnoreCase) ? 25 : 27);
+                return Results.Ok(new { role, roomId, roomName, temperature = temp });
             }
             else // admin
             {
-                var roomList = rooms.Select(r => new { id = r.Id, name = r.Name }).ToList();
+                var roomList = rooms.Select(r => new { 
+                    id = r.Id, 
+                    name = r.Name,
+                    temperature = _roomTemperatures.GetOrAdd(r.Id, id => id.Equals("office", StringComparison.OrdinalIgnoreCase) ? 25 : 27)
+                }).ToList();
                 return Results.Ok(new { role, rooms = roomList });
             }
         });
@@ -117,6 +169,13 @@ public static class AcEndpoints
             var mqttTopic = GetMqttTopic(targetRoomId, rooms);
             if (mqttTopic == null)
                 return Results.BadRequest(new { Message = $"找不到房間 '{targetRoomId}'" });
+
+            // 同步記憶最新溫度
+            if (request.Temperature.HasValue && request.Temperature.Value >= 16 && request.Temperature.Value <= 32)
+            {
+                _roomTemperatures[targetRoomId] = request.Temperature.Value;
+                SaveRoomStates();
+            }
 
             // ── 時間計算 ──
             DateTime? targetTimeUtc = null;
@@ -197,6 +256,12 @@ public static class AcEndpoints
                 ? GetMqttTopic(request.RoomId, rooms)
                 : null;
 
+            if (!string.IsNullOrEmpty(request.RoomId) && request.Temperature.HasValue && request.Temperature.Value >= 16 && request.Temperature.Value <= 32)
+            {
+                _roomTemperatures[request.RoomId] = request.Temperature.Value;
+                SaveRoomStates();
+            }
+
             var success = await mqttService.PublishCommandAsync(request.Action, request.Temperature, mqttTopic);
 
             if (success)
@@ -210,8 +275,13 @@ public static class AcEndpoints
         // ─────────────────────────────────────────────────────────────────────
         // 3. 取得目前所有的排程清單 (給前端 Web App 顯示用)
         //    GUEST 只能看自己房間，ADMIN 可看全部
+        //    同時在 Header 帶入該房間最新伺服器溫度以進行全員同步
         // ─────────────────────────────────────────────────────────────────────
-        app.MapGet("/api/schedules", ([FromQuery] string token, [FromQuery] string? roomId, IConfiguration config) =>
+        app.MapGet("/api/schedules", (
+            [FromQuery] string token, 
+            [FromQuery] string? roomId, 
+            HttpContext httpContext, 
+            IConfiguration config) =>
         {
             var auth   = GetAuth(config);
             var result = ResolveToken(token, auth);
@@ -229,6 +299,13 @@ public static class AcEndpoints
 
             IEnumerable<ScheduledRecord> list = _schedules.Values.OrderBy(x => x.ExecuteAt);
 
+            var targetRoom = role == "guest" ? resolvedRoomId : (roomId ?? "home");
+            if (!string.IsNullOrEmpty(targetRoom))
+            {
+                var currentTemp = _roomTemperatures.GetOrAdd(targetRoom, r => r.Equals("office", StringComparison.OrdinalIgnoreCase) ? 25 : 27);
+                httpContext.Response.Headers["X-Room-Temperature"] = currentTemp.ToString();
+            }
+
             // GUEST 只能看自己房間
             if (role == "guest")
                 list = list.Where(x => x.RoomId == resolvedRoomId);
@@ -237,6 +314,37 @@ public static class AcEndpoints
                 list = list.Where(x => x.RoomId == roomId);
 
             return Results.Ok(list.ToList());
+        });
+
+        // ─────────────────────────────────────────────────────────────────────
+        // 3.1 取得房間即時狀態與溫度
+        // ─────────────────────────────────────────────────────────────────────
+        app.MapGet("/api/room/status", ([FromQuery] string token, [FromQuery] string? roomId, IConfiguration config) =>
+        {
+            var auth = GetAuth(config);
+            var rooms = GetRooms(config);
+            var result = ResolveToken(token, auth);
+            if (result == null) return Results.Unauthorized();
+            var (role, resolvedRoomId) = result.Value;
+
+            if (role == "guest")
+            {
+                var temp = _roomTemperatures.GetOrAdd(resolvedRoomId, r => r.Equals("office", StringComparison.OrdinalIgnoreCase) ? 25 : 27);
+                return Results.Ok(new { roomId = resolvedRoomId, temperature = temp });
+            }
+            else
+            {
+                if (!string.IsNullOrEmpty(roomId))
+                {
+                    var temp = _roomTemperatures.GetOrAdd(roomId, r => r.Equals("office", StringComparison.OrdinalIgnoreCase) ? 25 : 27);
+                    return Results.Ok(new { roomId, temperature = temp });
+                }
+                var all = rooms.Select(r => new {
+                    roomId = r.Id,
+                    temperature = _roomTemperatures.GetOrAdd(r.Id, id => id.Equals("office", StringComparison.OrdinalIgnoreCase) ? 25 : 27)
+                }).ToList();
+                return Results.Ok(all);
+            }
         });
 
         // ─────────────────────────────────────────────────────────────────────

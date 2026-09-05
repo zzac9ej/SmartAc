@@ -1,25 +1,22 @@
-// 辦公室 ESP32 韌體 (Sampo 聲寶冷氣)
+// 辦公室 ESP32 韌體 - Sampo 聲寶冷氣
+// 24/7 + 防快速連點 + MQTT/WiFi 自動恢復 + Watchdog + Reset Log
 #define ROOM_OFFICE
 
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
+#include <esp_system.h>
 #include <Arduino.h>
-
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <ir_Kelon.h>
 
-// ============================================================
-// Wi-Fi 設定
-// ============================================================
+// ==================== Wi-Fi ====================
 const char* ssid = "XYZ";
 const char* password = "1234567890";
 
-// ============================================================
-// MQTT 設定
-// ============================================================
+// ==================== MQTT ====================
 const char* mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 
@@ -29,918 +26,694 @@ const char* mqtt_topic = "office/ac";
 const char* mqtt_topic = "home/livingroom/ac";
 #endif
 
-// ============================================================
-// 硬體設定
-// ============================================================
+// ==================== Hardware ====================
 const uint16_t kIrLed = 13;
-
 IRKelonAc ac(kIrLed);
 IRsend rawSender(kIrLed);
-
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-// ============================================================
-// Watchdog
-// ============================================================
+// ==================== Watchdog ====================
 #define WDT_TIMEOUT 15
 
-// ============================================================
-// 時間設定
-// ============================================================
-
-// Wi-Fi 每隔多久檢查一次
+// ==================== Timing ====================
 const unsigned long WIFI_CHECK_INTERVAL = 5000;
-
-// MQTT 每隔多久嘗試重新連線
+const unsigned long WIFI_BEGIN_INTERVAL = 30000;
 const unsigned long MQTT_RECONNECT_INTERVAL = 5000;
-
-// Wi-Fi 斷線多久後，強制重啟 ESP32
 const unsigned long WIFI_RESTART_TIMEOUT = 5UL * 60UL * 1000UL;
-
-// MQTT 連線失敗多久後，強制重啟 ESP32
 const unsigned long MQTT_RESTART_TIMEOUT = 10UL * 60UL * 1000UL;
-
-// 每 30 秒顯示系統狀態
 const unsigned long STATUS_REPORT_INTERVAL = 30000;
 
-// 最長運作時間
-// 0 = 不啟用 24 小時自動重開
+// 收到指令後等待 350ms；期間新指令會覆蓋舊指令
+const unsigned long COMMAND_SETTLE_MS = 350;
+
+// IR 最短發送間隔
+const unsigned long IR_MIN_INTERVAL_MS = 300;
+
+// 0 = 不定期重開
 const unsigned long REBOOT_INTERVAL_MS = 0;
 
-// ============================================================
-// 狀態變數
-// ============================================================
-
+// ==================== Runtime ====================
 unsigned long setupTime = 0;
-
 unsigned long lastWiFiCheckTime = 0;
+unsigned long lastWiFiBeginTime = 0;
 unsigned long lastMqttConnectAttempt = 0;
 unsigned long lastStatusReportTime = 0;
-
 unsigned long wifiDisconnectedSince = 0;
 unsigned long mqttDisconnectedSince = 0;
+unsigned long mqttMessageCount = 0;
+unsigned long irTransmitCount = 0;
+unsigned long lastIrTransmitTime = 0;
 
-// ============================================================
-// Watchdog 初始化
-// ============================================================
+// ==================== Pending Queue ====================
+// MQTT callback 不直接發 IR，避免 callback 被 IR 傳輸阻塞。
+// 採 LAST COMMAND WINS。
+struct PendingCommand {
+  bool valid;
+  char command[20];
+  int temperature;
+  char traceId[80];
+  unsigned long receivedAt;
+  unsigned long mqttNumber;
+};
 
+PendingCommand pending = {false, "", 25, "", 0, 0};
+
+// ==================== Reset Reason ====================
+const char* getResetReasonName(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_UNKNOWN:     return "UNKNOWN";
+    case ESP_RST_POWERON:     return "POWER_ON";
+    case ESP_RST_EXT:         return "EXTERNAL_RESET";
+    case ESP_RST_SW:          return "SOFTWARE_RESET";
+    case ESP_RST_PANIC:       return "PANIC_EXCEPTION";
+    case ESP_RST_INT_WDT:     return "INTERRUPT_WATCHDOG";
+    case ESP_RST_TASK_WDT:    return "TASK_WATCHDOG";
+    case ESP_RST_WDT:         return "OTHER_WATCHDOG";
+    case ESP_RST_DEEPSLEEP:   return "DEEP_SLEEP";
+    case ESP_RST_BROWNOUT:    return "BROWNOUT";
+    case ESP_RST_SDIO:        return "SDIO_RESET";
+    default:                  return "UNRECOGNIZED";
+  }
+}
+
+void printResetReason() {
+  esp_reset_reason_t reason = esp_reset_reason();
+
+  Serial.println();
+  Serial.println("============================================================");
+  Serial.println("[BOOT] RESET INFORMATION");
+  Serial.println("------------------------------------------------------------");
+  Serial.print("[BOOT] Reset reason = ");
+  Serial.println(getResetReasonName(reason));
+  Serial.print("[BOOT] Reset code   = ");
+  Serial.println((int)reason);
+  Serial.print("[BOOT] Chip model   = ");
+  Serial.println(ESP.getChipModel());
+  Serial.print("[BOOT] CPU freq     = ");
+  Serial.print(ESP.getCpuFreqMHz());
+  Serial.println(" MHz");
+  Serial.print("[BOOT] Flash size   = ");
+  Serial.print(ESP.getFlashChipSize());
+  Serial.println(" bytes");
+  Serial.print("[BOOT] Free heap    = ");
+  Serial.print(ESP.getFreeHeap());
+  Serial.println(" bytes");
+  Serial.println("============================================================");
+}
+
+// ==================== Watchdog ====================
 void initWatchdog() {
-
-#ifdef ESP_IDF_VERSION_VAL
-
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-
-  esp_task_wdt_config_t wdt_config = {
+  esp_task_wdt_config_t config = {
     .timeout_ms = WDT_TIMEOUT * 1000,
     .idle_core_mask = 0,
     .trigger_panic = true
   };
 
-  esp_task_wdt_init(&wdt_config);
-
+  esp_err_t r = esp_task_wdt_init(&config);
+  if (r != ESP_OK && r != ESP_ERR_INVALID_STATE) {
+    Serial.print("[WDT] init failed = ");
+    Serial.println((int)r);
+  }
 #else
-
   esp_task_wdt_init(WDT_TIMEOUT, true);
-
 #endif
 
-#else
-
-  esp_task_wdt_init(WDT_TIMEOUT, true);
-
-#endif
-
-  esp_task_wdt_add(NULL);
+  esp_err_t addResult = esp_task_wdt_add(NULL);
+  if (addResult == ESP_OK || addResult == ESP_ERR_INVALID_STATE) {
+    Serial.print("[WDT] ENABLED | Timeout = ");
+    Serial.print(WDT_TIMEOUT);
+    Serial.println(" sec");
+  } else {
+    Serial.print("[WDT] add task failed = ");
+    Serial.println((int)addResult);
+  }
 }
 
-// ============================================================
-// 自訂 Kelon IR 波形
-// ============================================================
-
-#ifndef ROOM_OFFICE
-void sendCustomKelon(uint64_t data) {
-
-  Serial.println("[IR] 開始發射 Kelon 紅外線");
-
-  rawSender.enableIROut(38);
-
-  // Header
-  rawSender.mark(7318);
-  rawSender.space(3758);
-
-  // 48-bit
-  for (int i = 0; i < 48; i++) {
-
-    rawSender.mark(530);
-
-    if ((data >> i) & 1ULL) {
-      rawSender.space(1294);
-    }
-    else {
-      rawSender.space(512);
-    }
-  }
-
-  // Footer
-  rawSender.mark(530);
-  rawSender.space(0);
-
-  Serial.println("[IR] 發射完成");
+inline void feedWatchdog() {
+  esp_task_wdt_reset();
 }
 
-// ============================================================
-// Kelon 指令產生器
-// ============================================================
-
-uint64_t getAcState(String command, int temp) {
-
-  // ----------------------------------------------------------
-  // 關機
-  // ----------------------------------------------------------
-
-  if (command == "turn_off") {
-
-    return 0x1C000077590EULL;
-  }
-
-  // ----------------------------------------------------------
-  // 開機
-  // ----------------------------------------------------------
-
-  if (command == "turn_on") {
-
-    // 限制溫度
-    if (temp < 18)
-      temp = 18;
-
-    if (temp > 32)
-      temp = 32;
-
-    uint64_t base = 0x00000077000EULL;
-
-    uint64_t byte5 =
-      (uint64_t)(temp + 4) << 40;
-
-    uint64_t byte1 =
-      (uint64_t)(temp + 155) << 8;
-
-    return base | byte5 | byte1;
-  }
-
-  // 未知指令
-  return 0x1C000077590EULL;
-}
-#else
-// ============================================================
-// 辦公室冷氣控制 (Sampo / CLIMABUTLER 協議)
-// ============================================================
-
-// 聲寶冷氣溫度代碼計算 (完整公式，已驗證 16-30°C)
-// 格式：0x3000000120XX
-// 規律：high nibble = temp - 16
-//       low  nibble = 9 - high  (temp 16~25°C, high 0~9)
-//                  = 25 - high  (temp 26~30°C, high 10~14)
-// 完整對照表：
-//   16°C → 0x09   17°C → 0x18   18°C → 0x27   19°C → 0x36
-//   20°C → 0x45   21°C → 0x54   22°C → 0x63   23°C → 0x72
-//   24°C → 0x81   25°C → 0x90   26°C → 0xAF   27°C → 0xBE
-//   28°C → 0xCD   29°C → 0xDC   30°C → 0xEB
+// ==================== Sampo Code ====================
 uint64_t getSampoCode(int temp) {
   if (temp < 16) temp = 16;
   if (temp > 30) temp = 30;
+
   uint8_t high = (uint8_t)(temp - 16);
-  uint8_t low  = (high <= 9) ? (9 - high) : (25 - high);
+  uint8_t low = (high <= 9) ? (9 - high) : (25 - high);
   uint8_t lastByte = (high << 4) | low;
+
   return 0x300000012000ULL | lastByte;
 }
 
-void sendOfficeAcCommand(String command, int temp) {
-  Serial.println("[IR] 開始發射辦公室冷氣紅外線 (Sampo CLIMABUTLER)");
+// ==================== Sampo OFF Raw ====================
+const uint16_t rawDataOff[109] = {
+  452,3586,454,544,450,546,476,458,514,546,
+  452,544,452,546,452,546,454,544,450,544,
+  452,544,452,546,450,548,450,546,448,548,
+  450,546,452,546,452,568,426,550,448,548,
+  450,546,448,546,450,550,446,548,448,570,
+  426,572,422,550,444,574,420,552,442,554,
+  444,576,422,572,424,576,420,576,422,576,
+  422,574,422,1574,420,556,444,576,420,1574,
+  420,576,422,576,420,578,418,576,420,578,
+  420,1574,420,576,422,574,420,1574,418,578,
+  420,578,420,1572,420,1574,420,3572,420
+};
 
-  if (command == "turn_on") {
-    uint64_t code = getSampoCode(temp);
-    Serial.print("[IR] 溫度: ");
-    Serial.print(temp);
-    Serial.print("°C → code = 0x");
+// ==================== IR ====================
+void sendOfficeAcCommand(const char* command, int temp,
+                         unsigned long mqttNumber, const char* traceId) {
+  unsigned long start = millis();
+
+  Serial.println();
+  Serial.println("------------------------------------------------------------");
+  Serial.println("[TRACE][IR] TRANSMIT START");
+  Serial.println("------------------------------------------------------------");
+  Serial.print("[TRACE][IR] MQTT#        = "); Serial.println(mqttNumber);
+  Serial.print("[TRACE][IR] Command      = "); Serial.println(command);
+  Serial.print("[TRACE][IR] Temperature  = "); Serial.println(temp);
+  Serial.print("[TRACE][IR] TraceId      = "); Serial.println(traceId);
+  Serial.print("[TRACE][IR] GPIO         = "); Serial.println(kIrLed);
+  Serial.println("[TRACE][IR] Frequency    = 38 kHz");
+
+  feedWatchdog();
+
+  if (strcmp(command, "turn_on") == 0) {
+    int actualTemp = constrain(temp, 16, 30);
+    uint64_t code = getSampoCode(actualTemp);
+
+    Serial.println("[TRACE][IR] Mode         = SAMPO CLIMABUTLER");
+    Serial.print("[TRACE][IR] Temperature  = ");
+    Serial.print(actualTemp);
+    Serial.println("°C");
+    Serial.print("[TRACE][IR] State        = 0x");
     Serial.println((unsigned long long)code, HEX);
+
     rawSender.sendClimaButler(code, 52);
 
-  } else if (command == "turn_off") {
-    // 關機使用錄製到的 rawData (UNKNOWN 協議)
-    uint16_t rawDataOff[109] = {
-      452, 3586,  454, 544,  450, 546,  476, 458,  514, 546,
-      452, 544,  452, 546,  452, 546,  454, 544,  450, 544,
-      452, 544,  452, 546,  450, 548,  450, 546,  448, 548,
-      450, 546,  452, 546,  452, 568,  426, 550,  448, 548,
-      450, 546,  448, 546,  450, 550,  446, 548,  448, 570,
-      426, 572,  422, 550,  444, 574,  420, 552,  442, 554,
-      444, 576,  422, 572,  424, 576,  420, 576,  422, 576,
-      422, 574,  422, 1574,  420, 556,  444, 576,  420, 1574,
-      420, 576,  422, 576,  420, 578,  418, 576,  420, 578,
-      420, 1574,  420, 576,  422, 574,  420, 1574,  418, 578,
-      420, 578,  420, 1572,  420, 1574,  420, 3572,  420
-    };
+  } else if (strcmp(command, "turn_off") == 0) {
+    Serial.println("[TRACE][IR] Mode         = RAW OFF CODE");
+    Serial.println("[TRACE][IR] Raw length   = 109");
     rawSender.sendRaw(rawDataOff, 109, 38);
-  }
 
-  Serial.println("[IR] 發射完成");
-}
-#endif
-
-// ============================================================
-// MQTT Callback
-// ============================================================
-
-void callback(
-  char* topic,
-  byte* payload,
-  unsigned int length
-) {
-
-  Serial.println();
-  Serial.println("====================================");
-  Serial.println("[MQTT] 收到訊息");
-  Serial.print("[MQTT] Topic: ");
-  Serial.println(topic);
-
-  // ----------------------------------------------------------
-  // Topic 檢查
-  // ----------------------------------------------------------
-
-  if (String(topic) != mqtt_topic) {
-
-    Serial.println("[MQTT] Topic 不符合，忽略");
-    Serial.println("====================================");
-
+  } else {
+    Serial.print("[TRACE][IR] UNKNOWN COMMAND = ");
+    Serial.println(command);
+    Serial.println("[TRACE][IR] RESULT       = NOT_SENT");
+    Serial.println("------------------------------------------------------------");
     return;
   }
 
-  // ----------------------------------------------------------
-  // JSON 解析
-  // ----------------------------------------------------------
+  feedWatchdog();
+
+  unsigned long elapsed = millis() - start;
+  irTransmitCount++;
+
+  Serial.print("[TRACE][IR] TRANSMIT DONE | elapsed = ");
+  Serial.print(elapsed);
+  Serial.println(" ms");
+  Serial.println("[TRACE][IR] RESULT       = SENT");
+  Serial.print("[TRACE][IR] IR Count     = ");
+  Serial.println(irTransmitCount);
+  Serial.println("------------------------------------------------------------");
+}
+
+// ==================== MQTT Callback ====================
+// 只解析、驗證、放入 pending。
+// 不在 callback 裡發 IR。
+void callback(char* topic, byte* payload, unsigned int length) {
+  mqttMessageCount++;
+  unsigned long mqttNumber = mqttMessageCount;
+
+  Serial.println();
+  Serial.println("============================================================");
+  Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+  Serial.println("] MESSAGE RECEIVED");
+  Serial.println("------------------------------------------------------------");
+
+  Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+  Serial.print("] Topic       = "); Serial.println(topic);
+
+  Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+  Serial.print("] Length      = "); Serial.print(length);
+  Serial.println(" bytes");
+
+  if (strcmp(topic, mqtt_topic) != 0) {
+    Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+    Serial.println("] RESULT      = IGNORED_WRONG_TOPIC");
+    Serial.println("============================================================");
+    return;
+  }
 
   JsonDocument doc;
-
-  DeserializationError error =
-    deserializeJson(doc, payload, length);
+  DeserializationError error = deserializeJson(doc, payload, length);
 
   if (error) {
-
-    Serial.print("[MQTT] JSON 解析失敗: ");
-    Serial.println(error.c_str());
-
-    Serial.println("====================================");
-
+    Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+    Serial.print("] JSON ERROR  = "); Serial.println(error.c_str());
+    Serial.println("[TRACE][MQTT] RESULT      = JSON_PARSE_ERROR");
+    Serial.println("============================================================");
     return;
   }
 
-  // ----------------------------------------------------------
-  // 取得 command
-  // ----------------------------------------------------------
-
-  const char* command =
-    doc["command"];
-
+  const char* command = doc["command"];
   if (command == nullptr) {
-
-    Serial.println("[MQTT] 缺少 command");
-
-    Serial.println("====================================");
-
+    Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+    Serial.println("] ERROR       = MISSING_COMMAND");
+    Serial.println("============================================================");
     return;
   }
 
-  // ----------------------------------------------------------
-  // 取得溫度
-  // ----------------------------------------------------------
+  int temp = doc["temperature"] | 25;
+  const char* traceId = doc["traceId"] | doc["requestId"] | "N/A";
 
-  int temp =
-    doc["temperature"] | 25; // 辦公室預設 25°C
+  Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+  Serial.print("] Action      = "); Serial.println(command);
 
-  Serial.print("[MQTT] command = ");
-  Serial.println(command);
+  Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+  Serial.print("] Temperature = "); Serial.println(temp);
 
-  Serial.print("[MQTT] temperature = ");
-  Serial.println(temp);
+  Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+  Serial.print("] TraceId     = "); Serial.println(traceId);
 
-  // ----------------------------------------------------------
-  // 開機
-  // ----------------------------------------------------------
-
-  if (String(command) == "turn_on") {
-
-    Serial.print("[AC] 開機，設定溫度: ");
-    Serial.print(temp);
-    Serial.println("°C");
-
-#ifndef ROOM_OFFICE
-    uint64_t state =
-      getAcState("turn_on", temp);
-
-    Serial.print("[IR] State = 0x");
-    Serial.println(
-      (unsigned long long)state,
-      HEX
-    );
-
-    sendCustomKelon(state);
-#else
-    sendOfficeAcCommand("turn_on", temp);
-#endif
-  }
-
-  // ----------------------------------------------------------
-  // 關機
-  // ----------------------------------------------------------
-
-  else if (String(command) == "turn_off") {
-
-    Serial.println("[AC] 關機");
-
-#ifndef ROOM_OFFICE
-    uint64_t state =
-      getAcState("turn_off", 0);
-
-    Serial.print("[IR] State = 0x");
-    Serial.println(
-      (unsigned long long)state,
-      HEX
-    );
-
-    sendCustomKelon(state);
-#else
-    sendOfficeAcCommand("turn_off", temp);
-#endif
-  }
-
-  // ----------------------------------------------------------
-  // 未知 command
-  // ----------------------------------------------------------
-
-  else {
-
-    Serial.print("[MQTT] 未知 command: ");
+  if (strcmp(command, "turn_on") != 0 &&
+      strcmp(command, "turn_off") != 0) {
+    Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+    Serial.print("] ERROR       = UNKNOWN_COMMAND: ");
     Serial.println(command);
+    Serial.println("============================================================");
+    return;
   }
 
-  Serial.println("====================================");
-}
+  bool replaced = pending.valid;
 
-// ============================================================
-// Wi-Fi 初始化
-// ============================================================
+  strncpy(pending.command, command, sizeof(pending.command) - 1);
+  pending.command[sizeof(pending.command) - 1] = '\0';
 
-void setupWiFi() {
+  pending.temperature = temp;
+
+  strncpy(pending.traceId, traceId, sizeof(pending.traceId) - 1);
+  pending.traceId[sizeof(pending.traceId) - 1] = '\0';
+
+  pending.receivedAt = millis();
+  pending.mqttNumber = mqttNumber;
+  pending.valid = true;
 
   Serial.println();
-  Serial.println("====================================");
-  Serial.println("[WiFi] 初始化 Wi-Fi");
-  Serial.print("[WiFi] SSID: ");
+  Serial.println("[QUEUE] --------------------------------------------------");
+
+  Serial.print("[QUEUE] MQTT message #");
+  Serial.print(mqttNumber);
+  if (replaced) Serial.println(" REPLACED previous pending command");
+  else Serial.println(" queued");
+
+  Serial.print("[QUEUE] Command     = "); Serial.println(pending.command);
+  Serial.print("[QUEUE] Temperature  = "); Serial.println(pending.temperature);
+  Serial.print("[QUEUE] TraceId      = "); Serial.println(pending.traceId);
+  Serial.println("[QUEUE] Policy       = LAST COMMAND WINS");
+  Serial.print("[QUEUE] State        = WAIT_SETTLE ");
+  Serial.print(COMMAND_SETTLE_MS);
+  Serial.println(" ms");
+  Serial.println("[QUEUE] --------------------------------------------------");
+
+  Serial.print("[TRACE][MQTT][#"); Serial.print(mqttNumber);
+  Serial.println("] RESULT      = ACCEPTED_TO_QUEUE");
+  Serial.println("============================================================");
+}
+
+// ==================== Queue → IR ====================
+void processPendingCommand() {
+  if (!pending.valid) return;
+
+  unsigned long now = millis();
+  unsigned long waited = now - pending.receivedAt;
+
+  if (waited < COMMAND_SETTLE_MS) return;
+
+  if (lastIrTransmitTime != 0 &&
+      now - lastIrTransmitTime < IR_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  PendingCommand command = pending;
+  pending.valid = false;
+
+  Serial.println();
+  Serial.println("============================================================");
+  Serial.print("[TRACE][QUEUE][MQTT#");
+  Serial.print(command.mqttNumber);
+  Serial.println("] READY TO EXECUTE");
+  Serial.println("------------------------------------------------------------");
+
+  Serial.print("[TRACE][QUEUE] Command     = ");
+  Serial.println(command.command);
+  Serial.print("[TRACE][QUEUE] Temperature  = ");
+  Serial.println(command.temperature);
+  Serial.print("[TRACE][QUEUE] TraceId      = ");
+  Serial.println(command.traceId);
+  Serial.print("[TRACE][QUEUE] Waited       = ");
+  Serial.print(waited);
+  Serial.println(" ms");
+  Serial.println("[TRACE][QUEUE] LAST COMMAND WINS = EXECUTING");
+
+  sendOfficeAcCommand(command.command, command.temperature,
+                      command.mqttNumber, command.traceId);
+
+  lastIrTransmitTime = millis();
+
+  Serial.print("[TRACE][QUEUE] RESULT       = EXECUTED | MQTT#");
+  Serial.println(command.mqttNumber);
+  Serial.println("============================================================");
+}
+
+// ==================== Wi-Fi ====================
+void setupWiFi() {
+  Serial.println();
+  Serial.println("============================================================");
+  Serial.println("[WiFi] INITIALIZATION");
+  Serial.println("------------------------------------------------------------");
+
+  Serial.print("[WiFi] SSID = ");
   Serial.println(ssid);
 
   WiFi.mode(WIFI_STA);
-
-  // 自動重新連線
   WiFi.setAutoReconnect(true);
-
-  // 避免睡眠造成 MQTT / IR 控制延遲
   WiFi.setSleep(false);
-
   WiFi.begin(ssid, password);
 
-  unsigned long startTime = millis();
+  unsigned long start = millis();
 
-  // 最多等待 10 秒
-  while (
-    WiFi.status() != WL_CONNECTED &&
-    millis() - startTime < 10000
-  ) {
-
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - start < 10000) {
     delay(250);
-
     Serial.print(".");
-
-    esp_task_wdt_reset();
+    feedWatchdog();
   }
 
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
-
-    Serial.println("[WiFi] 初始連線成功");
-
-    Serial.print("[WiFi] IP: ");
-    Serial.println(WiFi.localIP());
-
-    Serial.print("[WiFi] RSSI: ");
-    Serial.print(WiFi.RSSI());
+    Serial.println("[WiFi] ★ INITIAL CONNECTION SUCCESS ★");
+    Serial.print("[WiFi] IP   = "); Serial.println(WiFi.localIP());
+    Serial.print("[WiFi] RSSI = "); Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
-
     wifiDisconnectedSince = 0;
+  } else {
+    Serial.println("[WiFi] INITIAL CONNECTION FAILED");
+    Serial.println("[WiFi] LOOP WILL TRY AUTOMATIC RECOVERY");
   }
 
-  else {
-
-    Serial.println("[WiFi] 初始連線失敗");
-    Serial.println("[WiFi] 將在 loop() 自動重連");
-  }
-
-  Serial.println("====================================");
+  Serial.println("============================================================");
 }
-
-// ============================================================
-// Wi-Fi 重新連線
-// ============================================================
 
 void reconnectWiFi() {
-
   Serial.println();
-  Serial.println("[WiFi] 嘗試重新連線...");
+  Serial.println("[WiFi] Attempting automatic recovery...");
+  WiFi.reconnect();
+}
 
-  // 清除目前連線狀態
+void restartWiFiConnection() {
+  Serial.println();
+  Serial.println("[WiFi] Re-starting WiFi.begin()...");
   WiFi.disconnect(false);
-
   delay(100);
-
+  feedWatchdog();
   WiFi.begin(ssid, password);
 }
 
-// ============================================================
-// MQTT 重新連線
-// ============================================================
-
+// ==================== MQTT ====================
 void reconnectMQTT() {
-
-  if (WiFi.status() != WL_CONNECTED) {
-    return;
-  }
+  if (WiFi.status() != WL_CONNECTED) return;
 
   Serial.println();
-  Serial.println("[MQTT] 嘗試重新連線 HiveMQ...");
+  Serial.println("[MQTT] Attempting HiveMQ connection...");
 
-  // 建立新的 Client ID
-  String clientId = "ESP32-Kelon-";
+  String clientId = "ESP32-Office-";
+  uint64_t chipId = ESP.getEfuseMac();
 
-  clientId +=
-    String((uint32_t)ESP.getEfuseMac(), HEX);
+  char chipString[17];
+  snprintf(chipString, sizeof(chipString), "%llX",
+           (unsigned long long)chipId);
 
+  clientId += chipString;
   clientId += "-";
+  clientId += String((uint32_t)micros(), HEX);
 
-  clientId +=
-    String(random(0xffff), HEX);
-
-  Serial.print("[MQTT] Client ID: ");
+  Serial.print("[MQTT] Client ID = ");
   Serial.println(clientId);
 
-  // ----------------------------------------------------------
-  // 先確保舊 MQTT 狀態清除
-  // ----------------------------------------------------------
+  if (client.connected()) client.disconnect();
 
-  if (client.connected()) {
+  feedWatchdog();
 
-    client.disconnect();
-  }
-
-  // ----------------------------------------------------------
-  // 建立 MQTT
-  // ----------------------------------------------------------
-
-  bool connected =
-    client.connect(clientId.c_str());
+  bool connected = client.connect(clientId.c_str());
 
   if (connected) {
+    Serial.println("[MQTT] ★ MQTT CONNECTION SUCCESS ★");
 
-    Serial.println("[MQTT] ★ MQTT 連線成功 ★");
-
-    // --------------------------------------------------------
-    // 重新訂閱
-    // --------------------------------------------------------
-
-    bool subscribed =
-      client.subscribe(mqtt_topic);
+    bool subscribed = client.subscribe(mqtt_topic);
 
     if (subscribed) {
-
-      Serial.print("[MQTT] 已訂閱: ");
+      Serial.print("[MQTT] SUBSCRIBED = ");
       Serial.println(mqtt_topic);
-
       mqttDisconnectedSince = 0;
+    } else {
+      Serial.println("[MQTT] SUBSCRIBE FAILED");
     }
-
-    else {
-
-      Serial.println("[MQTT] 訂閱失敗");
-    }
-  }
-
-  else {
-
-    Serial.print("[MQTT] 連線失敗，狀態碼: ");
+  } else {
+    Serial.print("[MQTT] CONNECTION FAILED | state = ");
     Serial.println(client.state());
-
-    Serial.println(
-      "[MQTT] 稍後會再次嘗試"
-    );
+    Serial.println("[MQTT] Will retry automatically");
   }
 }
 
-// ============================================================
-// Wi-Fi 狀態管理
-// ============================================================
-
+// ==================== Wi-Fi State ====================
 void handleWiFi() {
-
   unsigned long now = millis();
 
-  // ----------------------------------------------------------
-  // Wi-Fi 正常
-  // ----------------------------------------------------------
-
   if (WiFi.status() == WL_CONNECTED) {
-
-    // 如果之前曾經斷線
     if (wifiDisconnectedSince != 0) {
-
       Serial.println();
-      Serial.println(
-        "[WiFi] ★ Wi-Fi 已恢復 ★"
-      );
-
-      Serial.print("[WiFi] IP: ");
-      Serial.println(WiFi.localIP());
-
+      Serial.println("[WiFi] ★ Wi-Fi RESTORED ★");
+      Serial.print("[WiFi] IP   = "); Serial.println(WiFi.localIP());
+      Serial.print("[WiFi] RSSI = "); Serial.print(WiFi.RSSI());
+      Serial.println(" dBm");
       wifiDisconnectedSince = 0;
     }
-
     return;
   }
 
-  // ----------------------------------------------------------
-  // 第一次偵測斷線
-  // ----------------------------------------------------------
-
   if (wifiDisconnectedSince == 0) {
-
     wifiDisconnectedSince = now;
-
     Serial.println();
-    Serial.println(
-      "[WiFi] !!! Wi-Fi 斷線 !!!"
-    );
-
-    Serial.println(
-      "[WiFi] 開始進行自動恢復"
-    );
+    Serial.println("[WiFi] !!! Wi-Fi DISCONNECTED !!!");
+    Serial.println("[WiFi] Automatic recovery started");
   }
 
-  // ----------------------------------------------------------
-  // 定期重連
-  // ----------------------------------------------------------
-
-  if (
-    now - lastWiFiCheckTime >=
-    WIFI_CHECK_INTERVAL
-  ) {
-
+  if (now - lastWiFiCheckTime >= WIFI_CHECK_INTERVAL) {
     lastWiFiCheckTime = now;
-
     reconnectWiFi();
   }
 
-  // ----------------------------------------------------------
-  // 長時間無法恢復
-  // ----------------------------------------------------------
+  if (now - lastWiFiBeginTime >= WIFI_BEGIN_INTERVAL) {
+    lastWiFiBeginTime = now;
+    restartWiFiConnection();
+  }
 
-  if (
-    now - wifiDisconnectedSince >=
-    WIFI_RESTART_TIMEOUT
-  ) {
-
+  if (now - wifiDisconnectedSince >= WIFI_RESTART_TIMEOUT) {
     Serial.println();
-    Serial.println(
-      "[SYSTEM] Wi-Fi 已超過 5 分鐘無法恢復"
-    );
-
-    Serial.println(
-      "[SYSTEM] 自動重新啟動 ESP32"
-    );
-
-    delay(1000);
-
+    Serial.println("[SYSTEM] Wi-Fi unavailable > 5 minutes");
+    Serial.println("[SYSTEM] ESP32 RESTART");
+    delay(500);
+    feedWatchdog();
     ESP.restart();
   }
 }
 
-// ============================================================
-// MQTT 狀態管理
-// ============================================================
-
+// ==================== MQTT State ====================
 void handleMQTT() {
-
   unsigned long now = millis();
 
-  // ----------------------------------------------------------
-  // Wi-Fi 還沒恢復
-  // ----------------------------------------------------------
-
-  if (WiFi.status() != WL_CONNECTED) {
-
-    return;
-  }
-
-  // ----------------------------------------------------------
-  // MQTT 正常
-  // ----------------------------------------------------------
+  if (WiFi.status() != WL_CONNECTED) return;
 
   if (client.connected()) {
-
     mqttDisconnectedSince = 0;
-
     client.loop();
-
     return;
   }
-
-  // ----------------------------------------------------------
-  // 第一次偵測 MQTT 斷線
-  // ----------------------------------------------------------
 
   if (mqttDisconnectedSince == 0) {
-
     mqttDisconnectedSince = now;
-
     Serial.println();
-    Serial.println(
-      "[MQTT] !!! MQTT 斷線 !!!"
-    );
-  }
-
-  // ----------------------------------------------------------
-  // 定期重新連線
-  // ----------------------------------------------------------
-
-  if (
-    now - lastMqttConnectAttempt >=
-    MQTT_RECONNECT_INTERVAL
-  ) {
-
-    lastMqttConnectAttempt = now;
-
-    reconnectMQTT();
-  }
-
-  // ----------------------------------------------------------
-  // MQTT 長時間無法恢復
-  // ----------------------------------------------------------
-
-  if (
-    now - mqttDisconnectedSince >=
-    MQTT_RESTART_TIMEOUT
-  ) {
-
-    Serial.println();
-    Serial.println(
-      "[SYSTEM] MQTT 已超過 10 分鐘無法恢復"
-    );
-
-    Serial.println(
-      "[SYSTEM] 自動重新啟動 ESP32"
-    );
-
-    delay(1000);
-
-    ESP.restart();
-  }
-}
-
-// ============================================================
-// 系統狀態監控
-// ============================================================
-
-void printSystemStatus() {
-
-  unsigned long now = millis();
-
-  if (
-    now - lastStatusReportTime <
-    STATUS_REPORT_INTERVAL
-  ) {
-
-    return;
-  }
-
-  lastStatusReportTime = now;
-
-  Serial.println();
-  Serial.println("--------------- SYSTEM STATUS ---------------");
-
-  // Uptime
-  Serial.print("Uptime: ");
-  Serial.print(
-    (now - setupTime) / 1000
-  );
-  Serial.println(" sec");
-
-  // Heap
-  Serial.print("Free Heap: ");
-  Serial.print(ESP.getFreeHeap());
-  Serial.println(" bytes");
-
-  // Wi-Fi
-  Serial.print("WiFi: ");
-
-  if (WiFi.status() == WL_CONNECTED) {
-
-    Serial.print("CONNECTED");
-
-    Serial.print(" | IP=");
-    Serial.print(WiFi.localIP());
-
-    Serial.print(" | RSSI=");
-    Serial.print(WiFi.RSSI());
-
-    Serial.println(" dBm");
-  }
-
-  else {
-
-    Serial.println("DISCONNECTED");
-  }
-
-  // MQTT
-  Serial.print("MQTT: ");
-
-  if (client.connected()) {
-
-    Serial.println("CONNECTED");
-  }
-
-  else {
-
-    Serial.print("DISCONNECTED");
-
-    Serial.print(" | State=");
+    Serial.println("[MQTT] !!! MQTT DISCONNECTED !!!");
+    Serial.print("[MQTT] State = ");
     Serial.println(client.state());
   }
 
-  Serial.println("----------------------------------------------");
+  if (now - lastMqttConnectAttempt >= MQTT_RECONNECT_INTERVAL) {
+    lastMqttConnectAttempt = now;
+    reconnectMQTT();
+  }
+
+  if (now - mqttDisconnectedSince >= MQTT_RESTART_TIMEOUT) {
+    Serial.println();
+    Serial.println("[SYSTEM] MQTT unavailable > 10 minutes");
+    Serial.println("[SYSTEM] ESP32 RESTART");
+    delay(500);
+    feedWatchdog();
+    ESP.restart();
+  }
 }
 
-// ============================================================
-// Setup
-// ============================================================
+// ==================== Status ====================
+void printSystemStatus() {
+  unsigned long now = millis();
 
+  if (now - lastStatusReportTime < STATUS_REPORT_INTERVAL) return;
+  lastStatusReportTime = now;
+
+  Serial.println();
+  Serial.println("============================================================");
+  Serial.println("[STATUS] SYSTEM HEALTH");
+  Serial.println("------------------------------------------------------------");
+
+  Serial.print("[STATUS] Uptime          = ");
+  Serial.print((now - setupTime) / 1000);
+  Serial.println(" sec");
+
+  Serial.print("[STATUS] Free Heap       = ");
+  Serial.print(ESP.getFreeHeap());
+  Serial.println(" bytes");
+
+  Serial.print("[STATUS] Min Free Heap   = ");
+  Serial.print(ESP.getMinFreeHeap());
+  Serial.println(" bytes");
+
+  Serial.print("[STATUS] MQTT Messages   = ");
+  Serial.println(mqttMessageCount);
+
+  Serial.print("[STATUS] IR Transmits    = ");
+  Serial.println(irTransmitCount);
+
+  Serial.print("[STATUS] Pending Command  = ");
+  if (pending.valid) {
+    Serial.print(pending.command);
+    Serial.print(" ");
+    Serial.print(pending.temperature);
+    Serial.println("C");
+  } else {
+    Serial.println("NONE");
+  }
+
+  Serial.print("[STATUS] WiFi            = ");
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("CONNECTED | IP=");
+    Serial.print(WiFi.localIP());
+    Serial.print(" | RSSI=");
+    Serial.print(WiFi.RSSI());
+    Serial.println(" dBm");
+  } else {
+    Serial.println("DISCONNECTED");
+  }
+
+  Serial.print("[STATUS] MQTT            = ");
+  if (client.connected()) {
+    Serial.println("CONNECTED");
+  } else {
+    Serial.print("DISCONNECTED | State=");
+    Serial.println(client.state());
+  }
+
+  Serial.print("[STATUS] Watchdog        = ");
+  Serial.print(WDT_TIMEOUT);
+  Serial.println(" sec");
+
+  Serial.println("============================================================");
+}
+
+// ==================== Setup ====================
 void setup() {
-
   Serial.begin(115200);
-
   delay(500);
 
   Serial.println();
   Serial.println();
-  Serial.println("====================================");
-  Serial.println("   ESP32 Kelon AC Controller");
-  Serial.println("   Auto Recovery Version");
-  Serial.println("====================================");
+  Serial.println("============================================================");
+  Serial.println("       ESP32 OFFICE SAMPO AC CONTROLLER");
+  Serial.println("       24/7 AUTO RECOVERY + TRACE VERSION");
+  Serial.println("============================================================");
 
-  // ----------------------------------------------------------
-  // 初始化 IR
-  // ----------------------------------------------------------
+  printResetReason();
 
-  Serial.println("[IR] 初始化紅外線");
-
+  Serial.println("[IR] Initializing IR transmitter...");
   ac.begin();
-
   rawSender.begin();
 
-  Serial.print("[IR] GPIO: ");
+  Serial.print("[IR] GPIO = ");
   Serial.println(kIrLed);
 
-  // ----------------------------------------------------------
-  // 初始化 Watchdog
-  // ----------------------------------------------------------
-
-  Serial.println("[SYSTEM] 初始化 Watchdog");
-
+  Serial.println("[SYSTEM] Initializing Watchdog...");
   initWatchdog();
-
-  // ----------------------------------------------------------
-  // 初始化 Wi-Fi
-  // ----------------------------------------------------------
+  feedWatchdog();
 
   setupWiFi();
+  feedWatchdog();
 
-  // ----------------------------------------------------------
-  // 初始化 MQTT
-  // ----------------------------------------------------------
-
-  client.setServer(
-    mqtt_server,
-    mqtt_port
-  );
-
+  client.setServer(mqtt_server, mqtt_port);
   client.setCallback(callback);
-
-  // MQTT Keep Alive
   client.setKeepAlive(30);
-
-  // MQTT Buffer
   client.setBufferSize(512);
 
-  // ----------------------------------------------------------
-  // 初始化時間
-  // ----------------------------------------------------------
+  randomSeed((uint32_t)(micros() ^ (uint32_t)ESP.getEfuseMac()));
 
   setupTime = millis();
-
   lastWiFiCheckTime = millis();
-
+  lastWiFiBeginTime = millis();
   lastMqttConnectAttempt = 0;
-
   lastStatusReportTime = millis();
 
   wifiDisconnectedSince = 0;
-
   mqttDisconnectedSince = 0;
 
-  // ----------------------------------------------------------
-  // 如果 Wi-Fi 已連線
-  // 立即嘗試 MQTT
-  // ----------------------------------------------------------
-
   if (WiFi.status() == WL_CONNECTED) {
-
     reconnectMQTT();
   }
 
   Serial.println();
-  Serial.println("====================================");
-  Serial.println("ESP32 初始化完成");
-  Serial.println("等待 MQTT 指令...");
-  Serial.println("====================================");
+  Serial.println("============================================================");
+  Serial.println("[SYSTEM] ESP32 INITIALIZATION COMPLETE");
+  Serial.println("[SYSTEM] Waiting for MQTT command...");
+  Serial.println("============================================================");
 }
 
-// ============================================================
-// Loop
-// ============================================================
-
+// ==================== Loop ====================
 void loop() {
+  feedWatchdog();
 
-  // ----------------------------------------------------------
-  // 1. Watchdog
-  // ----------------------------------------------------------
+  unsigned long currentMillis = millis();
 
-  esp_task_wdt_reset();
-
-  unsigned long currentMillis =
-    millis();
-
-  // ----------------------------------------------------------
-  // 2. 可選的定期重啟
-  // ----------------------------------------------------------
-
-  if (
-    REBOOT_INTERVAL_MS > 0 &&
-    currentMillis - setupTime >=
-      REBOOT_INTERVAL_MS
-  ) {
-
+  if (REBOOT_INTERVAL_MS > 0 &&
+      currentMillis - setupTime >= REBOOT_INTERVAL_MS) {
     Serial.println();
-    Serial.println(
-      "[SYSTEM] 達到定期重啟時間"
-    );
-
-    Serial.println(
-      "[SYSTEM] ESP32 Restart"
-    );
-
-    delay(1000);
-
+    Serial.println("[SYSTEM] Scheduled restart");
+    delay(500);
+    feedWatchdog();
     ESP.restart();
   }
 
-  // ----------------------------------------------------------
-  // 3. Wi-Fi 管理
-  // ----------------------------------------------------------
-
   handleWiFi();
-
-  // ----------------------------------------------------------
-  // 4. MQTT 管理
-  // ----------------------------------------------------------
+  feedWatchdog();
 
   handleMQTT();
+  feedWatchdog();
 
-  // ----------------------------------------------------------
-  // 5. 系統狀態監控
-  // ----------------------------------------------------------
+  // MQTT 收到後在 loop 中才真正發 IR
+  processPendingCommand();
+  feedWatchdog();
 
   printSystemStatus();
-
-  // ----------------------------------------------------------
-  // 6. 讓 CPU 稍微休息
-  // ----------------------------------------------------------
 
   delay(10);
 }
